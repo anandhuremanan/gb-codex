@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { Tool } from "../types";
+import { RepositoryCache } from "../cache";
 
 export class CreateFileTool implements Tool {
   name = "create_file";
@@ -24,6 +25,7 @@ export class CreateFileTool implements Tool {
       const applied = await vscode.workspace.applyEdit(edit);
       if (applied) {
         await doc.save();
+        RepositoryCache.getInstance().setFileContent(args.path, args.content);
         return { success: true, message: `File ${args.path} already existed. Overwrote content.` };
       }
       throw new Error(`File already exists and failed to overwrite.`);
@@ -35,6 +37,7 @@ export class CreateFileTool implements Tool {
       if (applied) {
         const doc = await vscode.workspace.openTextDocument(uri);
         await doc.save();
+        RepositoryCache.getInstance().setFileContent(args.path, args.content);
         return { success: true, message: `Successfully created file ${args.path}.` };
       } else {
         return { success: false, message: `Failed to create file ${args.path}.` };
@@ -42,3 +45,4 @@ export class CreateFileTool implements Tool {
     }
   }
 }
+

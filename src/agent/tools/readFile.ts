@@ -1,5 +1,5 @@
-import * as vscode from "vscode";
 import { Tool } from "../types";
+import { RepositoryCache } from "../cache";
 
 export class ReadFileTool implements Tool {
   name = "read_file";
@@ -9,12 +9,8 @@ export class ReadFileTool implements Tool {
     if (!args || typeof args.path !== "string") {
       throw new Error("Invalid arguments: 'path' must be a string.");
     }
-    const root = vscode.workspace.workspaceFolders?.[0]?.uri;
-    if (!root) {
-      throw new Error("No workspace folder open.");
-    }
-    const uri = vscode.Uri.joinPath(root, args.path);
-    const bytes = await vscode.workspace.fs.readFile(uri);
-    return new TextDecoder("utf8").decode(bytes);
+    const cache = RepositoryCache.getInstance();
+    return cache.getFileContent(args.path);
   }
 }
+

@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { Tool } from "../types";
+import { RepositoryCache } from "../cache";
 
 export class WriteFileTool implements Tool {
   name = "write_file";
@@ -26,6 +27,7 @@ export class WriteFileTool implements Tool {
       if (applied) {
         doc = await vscode.workspace.openTextDocument(uri);
         await doc.save();
+        RepositoryCache.getInstance().setFileContent(args.path, args.content);
         return { success: true, message: `Created and wrote to ${args.path}` };
       }
       throw new Error(`File does not exist and failed to create: ${err}`);
@@ -59,9 +61,11 @@ export class WriteFileTool implements Tool {
     const applied = await vscode.workspace.applyEdit(edit);
     if (applied) {
       await doc.save();
+      RepositoryCache.getInstance().setFileContent(args.path, args.content);
       return { success: true, message: `Successfully updated ${args.path} with minimal edits.` };
     } else {
       return { success: false, message: `Failed to apply workspace edit to ${args.path}.` };
     }
   }
 }
+

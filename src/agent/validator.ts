@@ -1,7 +1,6 @@
 import * as vscode from "vscode";
-import * as path from "path";
-import * as fs from "fs";
 import { exec } from "child_process";
+import { RepositoryCache } from "./cache";
 
 export interface ValidationResult {
   success: boolean;
@@ -17,21 +16,44 @@ export async function validateBuild(): Promise<ValidationResult> {
     throw new Error("No workspace folder open.");
   }
 
-  let hasBuildScript = false;
-  const packageJsonPath = path.join(root, "package.json");
+  const cache = RepositoryCache.getInstance();
+  const profile = cache.getProfile();
 
-  if (fs.existsSync(packageJsonPath)) {
-    try {
-      const pkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
-      if (pkg.scripts && typeof pkg.scripts.build === "string") {
-        hasBuildScript = true;
-      }
-    } catch {
-      // Ignore parsing errors and default to tsc
+  // Deduce the command based on the repository profile
+  let command = "";
+
+  if (profile.buildCommand) {
+    command = profile.buildCommand;
+  } else if (profile.testCommand) {
+    command = profile.testCommand;
+  } else {
+    // Language fallbacks
+    switch (profile.language) {
+      case "TypeScript":
+      case "JavaScript":
+        command = "npx tsc --noEmit";
+        break;
+      case "Go":
+        command = "go build ./...";
+        break;
+      case "Rust":
+        command = "cargo build";
+        break;
+      case "Python":
+        command = "python -m unittest";
+        break;
+      case "Java":
+        command = profile.packageManager === "gradle" ? "gradle build" : "mvn package";
+        break;
+      case "C#":
+        command = "dotnet build";
+        break;
+      default:
+        // Generic fallback: check if we can run typecheck or build
+        command = "npm run build";
+        break;
     }
   }
-
-  const command = hasBuildScript ? "npm run build" : "npx tsc --noEmit";
 
   return new Promise((resolve) => {
     exec(command, { cwd: root }, (error, stdout, stderr) => {
