@@ -1,14 +1,9 @@
 import * as vscode from "vscode";
-import {
-  findFileInWorkspace,
-  readFile,
-  writeFile,
-  extractFilenameFromMessage,
-  extractCodeBlock,
-} from "./fileAgent";
+import { runAgent } from "./agent/agentLoop";
 
 export class ChatViewProvider implements vscode.WebviewViewProvider {
   static readonly viewId = "gbs-local-dev.chatView";
+  private currentCancellationSource?: vscode.CancellationTokenSource;
 
   constructor(private readonly extensionUri: vscode.Uri) {}
 
@@ -18,7 +13,19 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
     webviewView.webview.onDidReceiveMessage(async (message) => {
       if (message.type === "userMessage") {
-        await handleUserMessage(message.text, webviewView.webview);
+        if (this.currentCancellationSource) {
+          this.currentCancellationSource.cancel();
+          this.currentCancellationSource.dispose();
+        }
+        this.currentCancellationSource = new vscode.CancellationTokenSource();
+
+        await handleUserMessage(message.text, webviewView.webview, this.currentCancellationSource.token);
+      } else if (message.type === "cancel") {
+        if (this.currentCancellationSource) {
+          this.currentCancellationSource.cancel();
+          this.currentCancellationSource.dispose();
+          this.currentCancellationSource = undefined;
+        }
       }
     });
   }
@@ -26,177 +33,46 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
 // ─── Core agent loop ─────────────────────────────────────────────────────────
 
-async function handleUserMessage(userMessage: string, webview: vscode.Webview) {
+async function handleUserMessage(
+  userMessage: string,
+  webview: vscode.Webview,
+  cancellationToken: vscode.CancellationToken
+) {
   const notify = (text: string) =>
     webview.postMessage({ type: "notify", text });
 
-  // 1. Detect a filename in the message
-  const filename = extractFilenameFromMessage(userMessage);
-  let fileUri: vscode.Uri | null = null;
-  let fileContent: string | null = null;
-
-  if (filename) {
-    fileUri = await findFileInWorkspace(filename);
-
-    if (fileUri) {
-      fileContent = await readFile(fileUri);
-      notify(`📂 Found and reading \`${filename}\`…`);
-    } else {
-      // File doesn't exist yet — create it in the workspace root
-      const root = vscode.workspace.workspaceFolders?.[0]?.uri;
-      if (root) {
-        fileUri = vscode.Uri.joinPath(root, filename);
-        notify(`📝 \`${filename}\` not found — will create it.`);
-      } else {
-        notify(`⚠️ No workspace folder open.`);
-      }
-    }
-  }
-
-  // 2. Build prompt — inject file content as context when available
-  const prompt = buildPrompt(userMessage, filename, fileContent);
-
-  // 3. Stream the model response silently (don't show raw code in chat)
-  notify("🤔 Thinking…");
-  let fullResponse = "";
-  await streamOllamaResponse(prompt, (token) => {
-    fullResponse += token;
-  });
-  notify("✔️ Response received.");
-
-  // 4. If a file target exists, extract the code block and write it
-  if (fileUri && filename) {
-    const code = extractCodeBlock(fullResponse);
-    if (code) {
-      // Try to open the document first (creates it if needed)
-      let doc: vscode.TextDocument;
-      try {
-        // If file doesn't exist yet, create it on disk first
-        try {
-          await vscode.workspace.fs.stat(fileUri);
-        } catch {
-          await writeFile(fileUri, code);
-        }
-
-        doc = await vscode.workspace.openTextDocument(fileUri);
-      } catch {
-        // Fallback: write to disk and open
-        await writeFile(fileUri, code);
-        doc = await vscode.workspace.openTextDocument(fileUri);
-      }
-
-      // Use WorkspaceEdit to replace full content (avoids stale-file conflicts)
-      const fullRange = new vscode.Range(
-        doc.positionAt(0),
-        doc.positionAt(doc.getText().length),
-      );
-      const edit = new vscode.WorkspaceEdit();
-      edit.replace(fileUri, fullRange, code);
-      await vscode.workspace.applyEdit(edit);
-
-      // Save the document so it persists to disk
-      await doc.save();
-
-      // Show the file in the editor
-      await vscode.window.showTextDocument(doc, { preview: false });
-
-      notify(`✅ Wrote updated code to \`${filename}\``);
-    } else {
-      notify(`⚠️ No code block found in response — file not modified.`);
-    }
-  }
-
-  // Signal the webview that processing is complete
-  webview.postMessage({ type: "done" });
-}
-
-// ─── Prompt builder ───────────────────────────────────────────────────────────
-
-function buildPrompt(
-  userMessage: string,
-  filename: string | null,
-  fileContent: string | null,
-): string {
-  const systemPrompt = `You are an expert software developer.
-When asked to create or modify a file, always respond with the COMPLETE updated file content inside a single fenced code block.
-Do not explain before the code block — put any explanation AFTER it.
-Never return partial code. Always return the entire file.`;
-
-  if (filename && fileContent !== null) {
-    return `${systemPrompt}
-
-Current contents of \`${filename}\`:
-\`\`\`
-${fileContent}
-\`\`\`
-
-User request: ${userMessage}`;
-  }
-
-  if (filename && fileContent === null) {
-    return `${systemPrompt}
-
-The file \`${filename}\` doesn't exist yet or couldn't be read. Generate its full content from scratch.
-
-User request: ${userMessage}`;
-  }
-
-  // No file involved — plain conversation
-  return `${systemPrompt}\n\nUser: ${userMessage}`;
-}
-
-// ─── Ollama streaming ─────────────────────────────────────────────────────────
-
-async function streamOllamaResponse(
-  prompt: string,
-  onToken: (token: string) => void,
-) {
-  let response: Response;
   try {
-    response = await fetch("http://localhost:11434/api/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "qwen2.5-coder:7b",
-        prompt,
-        stream: true,
-      }),
-    });
-  } catch {
-    onToken("\n\n⚠️ Could not reach Ollama at localhost:11434. Is it running?");
-    return;
-  }
-
-  if (!response.ok) {
-    const errText = await response.text().catch(() => "Unknown error");
-    onToken(`\n\n⚠️ Ollama returned an error (${response.status}): ${errText}`);
-    return;
-  }
-
-  // Ollama streams newline-delimited JSON chunks
-  const reader = response.body!.getReader();
-  const decoder = new TextDecoder();
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
-    }
-
-    // A single chunk may contain multiple newline-delimited JSON objects
-    const lines = decoder.decode(value).split("\n").filter(Boolean);
-    for (const line of lines) {
-      try {
-        const json = JSON.parse(line);
-        if (json.response) {
-          onToken(json.response);
+    const finalAnswer = await runAgent(
+      userMessage,
+      {
+        notify,
+        token: () => {
+          // Raw Ollama JSON tokens are processed internally, not streamed to chat bubbles
         }
-      } catch {
-        // incomplete chunk — skip
+      },
+      cancellationToken
+    );
+
+    // Simulate token streaming to the webview UI for smooth rendering
+    const chunkSize = 6;
+    for (let i = 0; i < finalAnswer.length; i += chunkSize) {
+      if (cancellationToken.isCancellationRequested) {
+        break;
       }
+      webview.postMessage({
+        type: "token",
+        text: finalAnswer.slice(i, i + chunkSize)
+      });
+      await new Promise((resolve) => setTimeout(resolve, 5));
     }
+  } catch (err: any) {
+    notify(`⚠️ Error: ${err.message || err}`);
+  } finally {
+    webview.postMessage({ type: "done" });
   }
 }
+
+
 
 // ─── Webview HTML ────────────────────────────────────────────────────────────
 
@@ -343,6 +219,7 @@ function getChatHtml(): string {
 <div id="input-bar">
   <textarea id="user-input" rows="1" placeholder="Ask about your code…"></textarea>
   <button id="send-btn">Send</button>
+  <button id="stop-btn" style="display: none; align-self: flex-end; padding: 7px 13px; border: none; border-radius: 5px; background: var(--vscode-errorForeground, #c73737); color: white; cursor: pointer; font-size: inherit;">Stop</button>
 </div>
 
 <script>
@@ -350,6 +227,7 @@ function getChatHtml(): string {
   const messages = document.getElementById('messages');
   const input    = document.getElementById('user-input');
   const sendBtn  = document.getElementById('send-btn');
+  const stopBtn  = document.getElementById('stop-btn');
 
   let assistantBubble = null;
   let thinkingEl      = null;
@@ -363,6 +241,10 @@ function getChatHtml(): string {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   });
   sendBtn.addEventListener('click', sendMessage);
+  stopBtn.addEventListener('click', function() {
+    vscode.postMessage({ type: 'cancel' });
+    appendBubble('notify', '⏹️ Cancelling agent execution...');
+  });
 
   function sendMessage() {
     var text = input.value.trim();
@@ -372,6 +254,8 @@ function getChatHtml(): string {
     input.value = '';
     input.style.height = 'auto';
     sendBtn.disabled = true;
+    sendBtn.style.display = 'none';
+    stopBtn.style.display = 'block';
 
     thinkingEl = appendBubble('assistant thinking', '');
     thinkingEl.innerHTML = '<span></span><span></span><span></span>';
@@ -402,6 +286,8 @@ function getChatHtml(): string {
       if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; }
       assistantBubble = null;
       sendBtn.disabled = false;
+      sendBtn.style.display = 'block';
+      stopBtn.style.display = 'none';
       input.focus();
     }
   });
@@ -418,3 +304,4 @@ function getChatHtml(): string {
 </body>
 </html>`;
 }
+
