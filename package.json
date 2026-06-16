@@ -1,7 +1,8 @@
 {
   "name": "gbs-local-dev",
-  "displayName": "GBS Local Dev",
+  "displayName": "GBS Software Agent",
   "description": "a local software agent",
+  "publisher": "gbs-internal-toolchain",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.120.0"
