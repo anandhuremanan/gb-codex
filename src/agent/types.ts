@@ -34,6 +34,16 @@ export interface ChatMessage {
   content: string;
 }
 
+export interface TaskSubtask {
+  description: string;
+  completed: boolean;
+}
+
+export interface TaskPlan {
+  goal: string;
+  subtasks: TaskSubtask[];
+}
+
 export interface TaskMemory {
   currentGoal: string;
   activeFiles: string[];
@@ -45,6 +55,7 @@ export interface TaskMemory {
   createdFiles: string[];
   modifiedFiles: string[];
   rejectedFiles: string[];
+  plan?: TaskPlan;
 }
 
 export interface SessionTaskSummary {
@@ -52,6 +63,7 @@ export interface SessionTaskSummary {
   summary: string;
   modifiedFiles: string[];
   createdFiles: string[];
+  symbolsTouched?: string[];
   timestamp: number;
 }
 

@@ -7,6 +7,7 @@ import { ReplaceInFileTool } from "./tools/replaceInFile";
 import { RunTerminalCommandTool } from "./tools/runCommand";
 import { SearchSymbolsTool } from "./tools/searchSymbols";
 import { FinishTool } from "./tools/finish";
+import { GetDirectoryContextTool } from "./tools/getDirectoryContext";
 
 export class ToolRegistry {
   private tools = new Map<string, Tool>();
@@ -37,5 +38,6 @@ globalRegistry.register(new ReplaceInFileTool());
 globalRegistry.register(new RunTerminalCommandTool());
 globalRegistry.register(new SearchSymbolsTool());
 globalRegistry.register(new FinishTool());
+globalRegistry.register(new GetDirectoryContextTool());
 
 

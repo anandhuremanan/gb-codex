@@ -20,7 +20,7 @@ export class ContextManager {
     this.history.push({ role: "user", content: toolObservation });
   }
 
-  public getMessages(): Message[] {
+  public async getMessages(): Promise<Message[]> {
     // Keep only last 3 interactions in history (3 assistant messages + 3 tool response messages)
     const MAX_HISTORY = 3;
     const historyMessagesToKeep = MAX_HISTORY * 2;
@@ -54,7 +54,7 @@ export class ContextManager {
     });
 
     // Enforce prompt budget
-    return PromptBudgetManager.enforce(
+    return await PromptBudgetManager.enforce(
       this.systemPrompt,
       this.repositorySummary,
       this.currentRequest,

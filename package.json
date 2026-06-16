@@ -1,9 +1,9 @@
 {
-  "name": "gbs-local-dev",
-  "displayName": "GBS Software Agent",
+  "name": "gbs-software-agent",
+  "displayName": "GBS SE Agent",
   "description": "a local software agent",
   "publisher": "gbs-internal-toolchain",
-  "version": "0.0.2",
+  "version": "0.0.1",
   "engines": {
     "vscode": "^1.120.0"
   },

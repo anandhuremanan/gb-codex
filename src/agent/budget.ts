@@ -1,18 +1,19 @@
 import { Message, AgentState } from "./types";
 import { AgentSessionManager } from "./sessionManager";
 import { RepositoryCache } from "./cache";
+import { ContextRetrievalService } from "./contextRetrieval";
 
 export class PromptBudgetManager {
   private static MAX_CONTEXT_TOKENS = 3000;
   private static MAX_CHARS = PromptBudgetManager.MAX_CONTEXT_TOKENS * 4;
 
-  public static enforce(
+  public static async enforce(
     systemPrompt: string,
     repoProfile: string,
     currentRequest: string,
     state: AgentState,
     history: Message[]
-  ): Message[] {
+  ): Promise<Message[]> {
     const getLength = (msgs: Message[]) => msgs.reduce((sum, m) => sum + m.content.length, 0);
 
     // Initial copies
@@ -21,8 +22,11 @@ export class PromptBudgetManager {
     while (true) {
       const session = AgentSessionManager.getInstance().getSession();
       const taskMemory = session.taskMemory;
-      const sessionMemory = session.sessionMemory;
       const profile = RepositoryCache.getInstance().getProfile();
+
+      // Retrieve working context and snapshot
+      const workingContext = await ContextRetrievalService.buildWorkingContext(currentRequest);
+      const snapshotStr = RepositoryCache.getInstance().getCompactWorkspaceSnapshot();
 
       const repoStr = `Repository:
 
@@ -31,6 +35,23 @@ ${profile.language}
 
 Framework:
 ${profile.framework || "None"}`;
+
+      const workingContextStr = `Working Context:
+Relevant Files:
+${workingContext.relevantFiles.map(f => `- ${f}`).join("\n") || "None"}
+
+Related Files:
+${workingContext.relatedFiles.map(f => `- ${f}`).join("\n") || "None"}
+
+Relevant Symbols:
+${workingContext.relevantSymbols.map(s => `- ${s}`).join("\n") || "None"}`;
+
+      let planStr = "";
+      if (taskMemory.plan) {
+        planStr = `Task Plan:
+Goal: ${taskMemory.plan.goal}
+${taskMemory.plan.subtasks.map(s => s.completed ? `[x] ${s.description}` : `[ ] ${s.description}`).join("\n")}`;
+      }
 
       const goalStr = `Current Goal:
 ${taskMemory.currentGoal || currentRequest}`;
@@ -50,9 +71,9 @@ ${taskMemory.rejectedFiles.map(f => `- ${f}`).join("\n") || "None"}
 Completed Actions:
 ${taskMemory.completedActions.map(a => `✓ ${a}`).join("\n") || "None"}`;
 
-      // Inject at most MAX_SESSION_SUMMARIES_IN_PROMPT = 3
+      // Inject only relevant historical tasks (Session Learning relevance filtered)
       const recentWorkStr = `Recent Work:
-${sessionMemory.recentTasks.map(t => `✓ ${t.goal}`).slice(0, 3).join("\n") || "None"}`;
+${workingContext.recentModifications.map(t => `✓ Goal: ${t.goal}\n  Summary: ${t.summary}`).join("\n\n") || "None"}`;
 
       const requestStr = `User Request:
 ${currentRequest}`;
@@ -60,7 +81,11 @@ ${currentRequest}`;
       // Build Preserved Base Message in the new structured format
       const preservedUserContent = `${repoStr}
 
-${goalStr}
+${snapshotStr}
+
+${workingContextStr}
+
+${planStr ? planStr + "\n\n" : ""}${goalStr}
 
 ${taskMemoryStr}
 

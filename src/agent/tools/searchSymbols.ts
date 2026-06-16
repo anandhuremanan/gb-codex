@@ -56,6 +56,19 @@ export class SymbolIndex {
     }
   }
 
+  public getSymbolsForFile(filePath: string): string[] {
+    const symbols: string[] = [];
+    const normalizedFile = filePath.replace(/\\/g, "/");
+    for (const [_, list] of this.index.entries()) {
+      for (const s of list) {
+        if (s.filePath.replace(/\\/g, "/") === normalizedFile) {
+          symbols.push(s.name);
+        }
+      }
+    }
+    return Array.from(new Set(symbols));
+  }
+
   public search(query: string): SymbolInfo[] {
     const results: SymbolInfo[] = [];
     const lowerQuery = query.toLowerCase();
