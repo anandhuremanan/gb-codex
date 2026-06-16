@@ -1,6 +1,6 @@
 # GBS Software Agent
 
-Local Agentic SW Coding
+Local Agentic SW Coding - Experimental Project
 
 ## Test it out
 
