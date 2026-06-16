@@ -4,7 +4,7 @@ import { RepositoryCache } from "../cache";
 
 export class CreateFileTool implements Tool {
   name = "create_file";
-  description = "Create a new file in the workspace. Arguments: { \"path\": \"relative/path/to/file\", \"content\": \"initial content\" }";
+  description = "Create a new file in the workspace. For large files, you can pass an empty string \"\" for content to create it first, then use patch_file to write its content in smaller steps. Arguments: { \"path\": \"relative/path/to/file\", \"content\": \"initial content\" }";
 
   async execute(args: { path: string; content: string }): Promise<{ success: boolean; message: string }> {
     if (!args || typeof args.path !== "string" || typeof args.content !== "string") {

@@ -6,6 +6,7 @@ import { CreateFileTool } from "./tools/createFile";
 import { SearchWorkspaceTool } from "./tools/searchWorkspace";
 import { RunTerminalCommandTool } from "./tools/runCommand";
 import { SearchSymbolsTool } from "./symbols";
+import { PatchFileTool } from "./tools/patchFile";
 
 export class ToolRegistry {
   private tools = new Map<string, Tool>();
@@ -31,5 +32,6 @@ globalRegistry.register(new CreateFileTool());
 globalRegistry.register(new SearchWorkspaceTool());
 globalRegistry.register(new RunTerminalCommandTool());
 globalRegistry.register(new SearchSymbolsTool());
+globalRegistry.register(new PatchFileTool());
 
 

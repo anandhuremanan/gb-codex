@@ -53,7 +53,7 @@ Rules:
   { "tool": "tool_name_1", "args": { ... } },
   { "tool": "tool_name_2", "args": { ... } }
 ]
-4. When writing or editing files, prefer write_file (which applies minimal edits) for existing files.
+4. When editing existing files, prefer patch_file to make targeted search-and-replace modifications instead of rewriting the entire file. Use write_file only if you need to rewrite the whole file content.
 5. If you need to create a new file that does not exist in the workspace, you MUST call the create_file tool. Do NOT just output the file contents in the final answer or conversational chat. You must execute the changes using tools!
 6. If you have completed the user's request, verified that all file changes exist in the workspace, and confirmed the build succeeds, output the final answer:
 {
@@ -74,7 +74,7 @@ Rules:
   let loopCount = 0;
   const maxLoopCount = 20;
   let validationRetries = 0;
-  const maxValidationRetries = 5;
+  const maxValidationRetries = 3;
   let filesModified = false;
 
   while (loopCount < maxLoopCount) {
@@ -207,7 +207,7 @@ Rules:
         const resultStr =
           typeof result === "string" ? result : JSON.stringify(result, null, 2);
 
-        if (tc.tool === "write_file" || tc.tool === "create_file") {
+        if (tc.tool === "write_file" || tc.tool === "create_file" || tc.tool === "patch_file") {
           filesModified = true;
         }
 
@@ -278,15 +278,15 @@ Build: ${profile.buildCommand || "None"}
 
 Top Level:
 ${Array.from(topLevelDirs)
-  .slice(0, 10)
-  .map((d) => `  ${d}`)
-  .join("\n")}
+      .slice(0, 10)
+      .map((d) => `  ${d}`)
+      .join("\n")}
 
 Important Files:
 ${importantFiles
-  .slice(0, 15)
-  .map((f) => `  ${f}`)
-  .join("\n")}`;
+      .slice(0, 15)
+      .map((f) => `  ${f}`)
+      .join("\n")}`;
 }
 
 function extractToolCalls(response: string): ToolCall[] | ToolCall | null {
@@ -369,13 +369,13 @@ async function streamOllamaResponse(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "qwen2.5-coder:7b",
+        model: "qwen3-coder:480b-cloud",
         messages,
         stream: true,
         options: {
           temperature: 0.1,
-          num_predict: 256,
-          num_ctx: 4096,
+          num_predict: 4096,
+          num_ctx: 32768,
         },
       }),
       signal: abortController.signal,

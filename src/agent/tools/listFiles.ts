@@ -10,4 +10,3 @@ export class ListFilesTool implements Tool {
     return cache.getWorkspaceTree();
   }
 }
-

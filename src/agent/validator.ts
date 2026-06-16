@@ -19,6 +19,16 @@ export async function validateBuild(): Promise<ValidationResult> {
   const cache = RepositoryCache.getInstance();
   const profile = cache.getProfile();
 
+  if (profile.language === "Unknown") {
+    return {
+      success: true,
+      command: "none",
+      stdout: "No build/test configuration detected. Skipping build validation.",
+      stderr: "",
+      code: 0
+    };
+  }
+
   // Deduce the command based on the repository profile
   let command = "";
 
