@@ -231,6 +231,7 @@ function getChatHtml(): string {
 
   let assistantBubble = null;
   let thinkingEl      = null;
+  let currentNotifyEl = null;
 
   input.addEventListener('input', function() {
     input.style.height = 'auto';
@@ -244,6 +245,7 @@ function getChatHtml(): string {
   stopBtn.addEventListener('click', function() {
     vscode.postMessage({ type: 'cancel' });
     appendBubble('notify', '⏹️ Cancelling agent execution...');
+    currentNotifyEl = null;
   });
 
   function sendMessage() {
@@ -259,6 +261,7 @@ function getChatHtml(): string {
 
     thinkingEl = appendBubble('assistant thinking', '');
     thinkingEl.innerHTML = '<span></span><span></span><span></span>';
+    currentNotifyEl = null;
 
     vscode.postMessage({ type: 'userMessage', text: text });
   }
@@ -267,7 +270,11 @@ function getChatHtml(): string {
     var data = event.data;
 
     if (data.type === 'notify') {
-      appendBubble('notify', data.text);
+      if (!currentNotifyEl) {
+        currentNotifyEl = appendBubble('notify', data.text);
+      } else {
+        currentNotifyEl.textContent = data.text;
+      }
       return;
     }
 
@@ -278,6 +285,7 @@ function getChatHtml(): string {
         assistantBubble = thinkingEl;
         thinkingEl = null;
       }
+      currentNotifyEl = null;
       assistantBubble.textContent += data.text;
       messages.scrollTop = messages.scrollHeight;
     }
@@ -285,6 +293,7 @@ function getChatHtml(): string {
     if (data.type === 'done') {
       if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; }
       assistantBubble = null;
+      currentNotifyEl = null;
       sendBtn.disabled = false;
       sendBtn.style.display = 'block';
       stopBtn.style.display = 'none';

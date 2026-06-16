@@ -10,7 +10,57 @@ export interface ValidationResult {
   code: number;
 }
 
-export async function validateBuild(): Promise<ValidationResult> {
+export class ValidationStrategy {
+  public static getValidationCommand(profile: any, modifiedFiles: string[]): string {
+    // 1. React / Frontend Framework light check
+    if (profile.framework === "React" || profile.framework === "Next.js" || profile.framework === "Vue") {
+      const lintableFiles = modifiedFiles.filter(f => f.match(/\.(ts|tsx|js|jsx)$/));
+      if (lintableFiles.length > 0) {
+        return `npx eslint ${lintableFiles.join(" ")}`;
+      }
+    }
+
+    // 2. TypeScript / JavaScript check
+    if (profile.language === "TypeScript") {
+      return "npx tsc --noEmit";
+    }
+
+    // 3. Go check
+    if (profile.language === "Go") {
+      return "go build ./...";
+    }
+
+    // 4. Rust check
+    if (profile.language === "Rust") {
+      return "cargo check";
+    }
+
+    // 5. Python check
+    if (profile.language === "Python") {
+      const pythonFiles = modifiedFiles.filter(f => f.endsWith(".py"));
+      const testFiles = pythonFiles.filter(f => f.includes("test_") || f.endsWith("_test.py"));
+      if (testFiles.length > 0) {
+        return `pytest ${testFiles.join(" ")}`;
+      }
+      if (pythonFiles.length > 0) {
+        return `python -m py_compile ${pythonFiles.join(" ")}`;
+      }
+      return profile.testCommand || "pytest";
+    }
+
+    // Fallbacks
+    if (profile.buildCommand) {
+      return profile.buildCommand;
+    }
+    if (profile.testCommand) {
+      return profile.testCommand;
+    }
+
+    return "npm run build";
+  }
+}
+
+export async function validateBuild(modifiedFiles: string[] = []): Promise<ValidationResult> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!root) {
     throw new Error("No workspace folder open.");
@@ -29,41 +79,8 @@ export async function validateBuild(): Promise<ValidationResult> {
     };
   }
 
-  // Deduce the command based on the repository profile
-  let command = "";
-
-  if (profile.buildCommand) {
-    command = profile.buildCommand;
-  } else if (profile.testCommand) {
-    command = profile.testCommand;
-  } else {
-    // Language fallbacks
-    switch (profile.language) {
-      case "TypeScript":
-      case "JavaScript":
-        command = "npx tsc --noEmit";
-        break;
-      case "Go":
-        command = "go build ./...";
-        break;
-      case "Rust":
-        command = "cargo build";
-        break;
-      case "Python":
-        command = "python -m unittest";
-        break;
-      case "Java":
-        command = profile.packageManager === "gradle" ? "gradle build" : "mvn package";
-        break;
-      case "C#":
-        command = "dotnet build";
-        break;
-      default:
-        // Generic fallback: check if we can run typecheck or build
-        command = "npm run build";
-        break;
-    }
-  }
+  // Determine the command dynamically based on the ValidationStrategy
+  const command = ValidationStrategy.getValidationCommand(profile, modifiedFiles);
 
   return new Promise((resolve) => {
     exec(command, { cwd: root }, (error, stdout, stderr) => {

@@ -3,10 +3,10 @@ import { ListFilesTool } from "./tools/listFiles";
 import { ReadFileTool } from "./tools/readFile";
 import { WriteFileTool } from "./tools/writeFile";
 import { CreateFileTool } from "./tools/createFile";
-import { SearchWorkspaceTool } from "./tools/searchWorkspace";
+import { ReplaceInFileTool } from "./tools/replaceInFile";
 import { RunTerminalCommandTool } from "./tools/runCommand";
-import { SearchSymbolsTool } from "./symbols";
-import { PatchFileTool } from "./tools/patchFile";
+import { SearchSymbolsTool } from "./tools/searchSymbols";
+import { FinishTool } from "./tools/finish";
 
 export class ToolRegistry {
   private tools = new Map<string, Tool>();
@@ -19,6 +19,10 @@ export class ToolRegistry {
     return this.tools.get(name);
   }
 
+  public hasTool(name: string): boolean {
+    return this.tools.has(name);
+  }
+
   public getTools(): Tool[] {
     return Array.from(this.tools.values());
   }
@@ -29,9 +33,9 @@ globalRegistry.register(new ListFilesTool());
 globalRegistry.register(new ReadFileTool());
 globalRegistry.register(new WriteFileTool());
 globalRegistry.register(new CreateFileTool());
-globalRegistry.register(new SearchWorkspaceTool());
+globalRegistry.register(new ReplaceInFileTool());
 globalRegistry.register(new RunTerminalCommandTool());
 globalRegistry.register(new SearchSymbolsTool());
-globalRegistry.register(new PatchFileTool());
+globalRegistry.register(new FinishTool());
 
 

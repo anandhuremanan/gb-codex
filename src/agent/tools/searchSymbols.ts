@@ -1,5 +1,5 @@
-import { Tool } from "./types";
-import { RepositoryCache } from "./cache";
+import { Tool } from "../types";
+import { RepositoryCache } from "../cache";
 
 export interface SymbolInfo {
   name: string;
@@ -68,15 +68,68 @@ export class SymbolIndex {
   }
 }
 
+export interface SymbolSearchResult {
+  file: string;
+  symbol: string;
+  type: string;
+}
+
 export class SearchSymbolsTool implements Tool {
   name = "search_symbols";
-  description = "Search for classes, interfaces, structs, functions, exports, routes, and handlers in the workspace. Arguments: { \"query\": \"search string\" }";
+  description = "Search for classes, interfaces, structs, functions, exports, routes, and handlers in the workspace. Falls back to text search on cached files if no symbol matches are found. Arguments: { \"query\": \"search term\" }";
+  schema = {
+    type: "object",
+    properties: {
+      query: {
+        type: "string",
+        description: "The term or substring to search for in symbols or cached files"
+      }
+    },
+    required: ["query"]
+  };
 
-  async execute(args: { query: string }): Promise<SymbolInfo[]> {
+  async execute(args: { query: string }): Promise<SymbolSearchResult[]> {
     if (!args || typeof args.query !== "string") {
       throw new Error("Invalid arguments: 'query' must be a string.");
     }
+
+    const query = args.query.toLowerCase();
     const cache = RepositoryCache.getInstance();
-    return cache.getSymbolIndex().search(args.query);
+    
+    // 1. Search indexed symbols
+    const symbolIndex = cache.getSymbolIndex();
+    const symbolMatches = symbolIndex.search(query);
+
+    if (symbolMatches.length > 0) {
+      return symbolMatches.map((sym: SymbolInfo) => ({
+        file: sym.filePath,
+        symbol: sym.name,
+        type: sym.type
+      }));
+    }
+
+    // 2. Fallback to text search in cached files only
+    const results: SymbolSearchResult[] = [];
+    const cachedContents = cache.getCachedFileContents();
+
+    for (const [filePath, content] of cachedContents.entries()) {
+      if (content.toLowerCase().includes(query)) {
+        const lines = content.split(/\r?\n/);
+        for (const line of lines) {
+          if (line.toLowerCase().includes(query)) {
+            results.push({
+              file: filePath,
+              symbol: line.trim().slice(0, 100), // concise preview
+              type: "text_match"
+            });
+            if (results.length >= 50) {
+              return results;
+            }
+          }
+        }
+      }
+    }
+
+    return results;
   }
 }

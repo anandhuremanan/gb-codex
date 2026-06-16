@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { Message, ToolCall } from "./types";
+import { Message, ToolCall, AgentState } from "./types";
 import { globalRegistry } from "./registry";
 import { validateBuild } from "./validator";
 import { RepositoryCache } from "./cache";
@@ -11,9 +11,103 @@ export interface AgentProgress {
   token(text: string): void;
 }
 
-// Create a debug output channel to show real-time agent execution
 export const agentOutputChannel =
   vscode.window.createOutputChannel("GBS Agent Debug");
+
+function generateToolsDescription(): string {
+  const tools = globalRegistry.getTools();
+  return tools.map((t) => {
+    return `${t.name}\nDescription: ${t.description}\nArguments Schema:\n${JSON.stringify(t.schema, null, 2)}`;
+  }).join("\n\n");
+}
+
+function extractCompletedObjectives(response: string): string[] {
+  try {
+    const jsonBlockRegex = /```(?:json)?\n([\s\S]*?)```/i;
+    const match = response.match(jsonBlockRegex);
+    const textToParse = match ? match[1].trim() : response.trim();
+
+    const firstCurly = textToParse.indexOf("{");
+    const firstBracket = textToParse.indexOf("[");
+
+    let startIdx = -1;
+    let endIdx = -1;
+
+    if (firstBracket !== -1 && (firstCurly === -1 || firstBracket < firstCurly)) {
+      startIdx = firstBracket;
+      endIdx = textToParse.lastIndexOf("]");
+    } else {
+      startIdx = firstCurly;
+      endIdx = textToParse.lastIndexOf("}");
+    }
+
+    if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+      const jsonCandidate = textToParse.slice(startIdx, endIdx + 1);
+      const parsed = JSON.parse(jsonCandidate);
+      if (parsed && typeof parsed === "object") {
+        if (Array.isArray(parsed.completedObjectives)) {
+          return parsed.completedObjectives.map((o: any) => String(o));
+        }
+        if (Array.isArray(parsed)) {
+          for (const item of parsed) {
+            if (item && item.completedObjectives && Array.isArray(item.completedObjectives)) {
+              return item.completedObjectives.map((o: any) => String(o));
+            }
+          }
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+// Helper to compute a simple hash
+function hashString(str: string): string {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = (hash << 5) - hash + char;
+    hash |= 0; // Convert to 32bit integer
+  }
+  return hash.toString(36);
+}
+
+interface EditRecord {
+  file: string;
+  tool: string;
+  searchHash?: string;
+  replaceHash?: string;
+}
+
+function detectLoopPattern(fileEdits: EditRecord[]): boolean {
+  // Only keep edits that have searchHash and replaceHash
+  const sigs = fileEdits.filter(e => e.searchHash !== undefined && e.replaceHash !== undefined);
+  if (sigs.length < 2) {
+    return false;
+  }
+  
+  // Check for repeated signatures: same searchHash and same replaceHash
+  for (let i = 0; i < sigs.length; i++) {
+    for (let j = i + 1; j < sigs.length; j++) {
+      if (sigs[i].searchHash === sigs[j].searchHash && sigs[i].replaceHash === sigs[j].replaceHash) {
+        return true;
+      }
+    }
+  }
+
+  // Check for reversed/toggling signatures: A -> B and B -> A
+  for (let i = 0; i < sigs.length; i++) {
+    for (let j = i + 1; j < sigs.length; j++) {
+      if (sigs[i].searchHash === sigs[j].replaceHash && sigs[i].replaceHash === sigs[j].searchHash) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
 
 export async function runAgent(
   userRequest: string,
@@ -22,13 +116,30 @@ export async function runAgent(
 ): Promise<string> {
   const tools = globalRegistry.getTools();
 
+  // Initialize AgentState (scoped to this session run only)
+  const agentState: AgentState = {
+    modifiedFiles: [],
+    completedObjectives: [],
+    discoveredFiles: [],
+    buildErrors: [],
+    recentlyModifiedFiles: [],
+    searchResults: [],
+    openedFiles: [],
+    discoveredSymbols: [],
+    finishHints: 0,
+  };
+
+  const modifiedFiles: string[] = [];
+  const lastReadContent = new Map<string, string>();
+  const editRecords: EditRecord[] = [];
+
   // Show and clear debug output channel
   agentOutputChannel.show(true);
   agentOutputChannel.clear();
   agentOutputChannel.appendLine("[GBS Agent Loop Started]");
   agentOutputChannel.appendLine(`User Request: ${userRequest}\n`);
 
-  // Initialize Cache once (subsequent calls are cheap/reused)
+  // Initialize Cache once
   progress.notify("Initializing repository cache...");
   const cache = RepositoryCache.getInstance();
   await cache.initialize();
@@ -42,33 +153,50 @@ export async function runAgent(
   const systemPrompt = `You are a tool-driven autonomous coding agent similar to Cursor or Claude Code.
 You execute tasks in the workspace by planning, invoking tools, and analyzing results.
 
-Available tools:
-${tools.map((t) => `- ${t.name}: ${t.description}`).join("\n")}
+Available Tools:
+${generateToolsDescription()}
+
+You MUST use only the tools above.
+Never invent tool names.
 
 Rules:
 1. You MUST respond in a single valid JSON block containing either a tool call, a list of tool calls, or the final answer.
-2. Do not output any conversational chat, explanation, or markdown outside the JSON block.
-3. Every turn you can call ONE or MULTIPLE tools in parallel. To call multiple tools, output a JSON array of tool call objects:
-[
-  { "tool": "tool_name_1", "args": { ... } },
-  { "tool": "tool_name_2", "args": { ... } }
-]
-4. When editing existing files, prefer patch_file to make targeted search-and-replace modifications instead of rewriting the entire file. Use write_file only if you need to rewrite the whole file content.
-5. If you need to create a new file that does not exist in the workspace, you MUST call the create_file tool. Do NOT just output the file contents in the final answer or conversational chat. You must execute the changes using tools!
-6. If you have completed the user's request, verified that all file changes exist in the workspace, and confirmed the build succeeds, output the final answer:
+2. In your JSON response, you can optionally include a 'completedObjectives' array of strings listing the objectives/tasks you have completed in this turn.
+Example format:
 {
-  "tool": "final_answer",
+  "tool": "replace_in_file",
+  "args": { ... },
+  "completedObjectives": ["Applied yellow/black theme", "Updated hero section"]
+}
+3. Do not output any conversational chat, explanation, or markdown outside the JSON block.
+4. Every turn you can call ONE or MULTIPLE tools in parallel. To call multiple tools, output a JSON array of tool call objects.
+5. Heuristic for File Changes:
+   * Small change -> replace_in_file (where changes represent less than 70% of the original file).
+   * Large rewrite -> write_file (where changes represent more than 70% of the original file).
+   Do not repeatedly rewrite full files.
+6. If you need to create a new file that does not exist in the workspace, you MUST call the create_file tool. Do NOT just output the file contents in the final answer or conversational chat. You must execute the changes using tools!
+7. When the user request has been completed, you MUST call the finish tool:
+{
+  "tool": "finish",
   "args": {
-    "message": "Write the final explanation of the changes made and results."
+    "summary": "Write the final explanation of the changes made and results."
   }
 }
-7. Always think step-by-step. Discover workspace structure or search symbols first.`;
+Once the requested change has been successfully applied,
+finish immediately.
+
+Do not continue making aesthetic or optional improvements
+unless explicitly requested by the user.
+
+Finish should be preferred over further refinement.
+8. Always think step-by-step. Discover workspace structure or search symbols first.`;
 
   // Initialize ContextManager
   const contextManager = new ContextManager(
     systemPrompt,
     repoSummary,
     userRequest,
+    agentState,
   );
 
   let loopCount = 0;
@@ -108,8 +236,24 @@ Rules:
       return `Failed to generate response due to model error: ${err}`;
     }
 
+    // Extract completed objectives from this turn
+    const objectives = extractCompletedObjectives(responseText);
+    for (const obj of objectives) {
+      if (!agentState.completedObjectives.includes(obj)) {
+        agentState.completedObjectives.push(obj);
+      }
+    }
+
     const extracted = extractToolCalls(responseText);
+    
+    // Loop Exit Heuristics: Nudge model if it output no tool call but there are build errors
     if (!extracted) {
+      if (agentState.buildErrors.length > 0) {
+        progress.notify("Build errors found. Nudging model...");
+        const errorMsg = `The build is currently failing. Please call the appropriate tools (like replace_in_file or run_terminal_command) to fix these errors:\n${agentState.buildErrors.join("\n")}`;
+        contextManager.addInteraction(responseText, errorMsg);
+        continue;
+      }
       progress.notify("Complete.");
       agentOutputChannel.appendLine(
         "\n[Warning] Response was not valid JSON tool call. Treating as final answer.",
@@ -119,64 +263,15 @@ Rules:
 
     const toolCalls = Array.isArray(extracted) ? extracted : [extracted];
 
-    // Check if any is final_answer
-    const finalAnswerCall = toolCalls.find((tc) => tc.tool === "final_answer");
-    if (finalAnswerCall) {
-      const finalMsg =
-        finalAnswerCall.args.message || JSON.stringify(finalAnswerCall.args);
-      if (filesModified) {
-        if (validationRetries < maxValidationRetries) {
-          progress.notify("Validating changes (running build/type-check)...");
-          agentOutputChannel.appendLine(
-            `\n[Validation] Checking build after file modifications...`,
-          );
-          const buildResult = await validateBuild();
-          agentOutputChannel.appendLine(
-            `[Validation Output] Command: "${buildResult.command}" (exit code ${buildResult.code})`,
-          );
-
-          if (buildResult.success) {
-            progress.notify("Build succeeded!");
-            agentOutputChannel.appendLine(
-              `[Validation Success] Build succeeded! Ending loop.`,
-            );
-            return finalMsg;
-          } else {
-            validationRetries++;
-            progress.notify(
-              `Build failed (${validationRetries}/${maxValidationRetries}). Feeding errors back...`,
-            );
-
-            // Extract and compress compiler logs
-            const compressedErrors = extractBuildErrors(
-              (buildResult.stdout || "") + "\n" + (buildResult.stderr || ""),
-            );
-
-            agentOutputChannel.appendLine(
-              `[Validation Failure] Build failed. Compressed Errors:\n${compressedErrors}`,
-            );
-
-            const buildErrorMsg = `Build validation failed when running "${buildResult.command}" (code ${buildResult.code}).\nErrors:\n${compressedErrors}\n\nPlease analyze the errors, make edits to fix them, and ensure the build succeeds.`;
-
-            contextManager.addInteraction(responseText, buildErrorMsg);
-            continue;
-          }
-        } else {
-          progress.notify(
-            "Build is still failing, but maximum self-correction retries reached.",
-          );
-          agentOutputChannel.appendLine(
-            `[Validation Aborted] Maximum retries reached. Returning answer despite failures.`,
-          );
-          return `${finalMsg}\n\n Note: The build validation is currently failing. Please review the errors.`;
-        }
-      } else {
-        progress.notify("Complete.");
-        agentOutputChannel.appendLine(
-          `\n[Finished] Completed request with no modifications. Ending loop.`,
-        );
-        return finalMsg;
-      }
+    // Finish Tool termination
+    const finishCall = toolCalls.find((tc) => tc.tool === "finish");
+    if (finishCall) {
+      const summaryMsg = finishCall.args.summary || JSON.stringify(finishCall.args);
+      progress.notify("Complete.");
+      agentOutputChannel.appendLine(
+        `\n[Finished] Completed request with finish tool: ${summaryMsg}`,
+      );
+      return `SUCCESS: ${summaryMsg}`;
     }
 
     // Execute standard tools in parallel
@@ -186,13 +281,48 @@ Rules:
     );
 
     const executionPromises = toolCalls.map(async (tc, index) => {
-      const tool = globalRegistry.getTool(tc.tool);
-      if (!tool) {
-        const errMsg = `Tool "${tc.tool}" not found. Available tools are: ${globalRegistry
-          .getTools()
-          .map((t) => t.name)
-          .join(", ")}`;
-        return { tool: tc.tool, success: false, content: `Error: ${errMsg}` };
+      // Strict Tool Validation
+      if (!globalRegistry.hasTool(tc.tool)) {
+        const available = globalRegistry.getTools().map(t => `- ${t.name}`).join("\n");
+        const errMsg = `Error: Tool "${tc.tool}" does not exist. Available Tools:\n${available}`;
+        agentOutputChannel.appendLine(`[Error] Invalid tool call: ${tc.tool}`);
+        return { tool: tc.tool, success: false, content: errMsg };
+      }
+
+      const tool = globalRegistry.getTool(tc.tool)!;
+
+      // Scoped Cache Hit & Duplicate Read Protection
+      if (tc.tool === "read_file") {
+        if (tc.args && typeof tc.args.path === "string") {
+          const path = tc.args.path;
+          const cachedContent = RepositoryCache.getInstance().getCachedFileContents().get(path);
+          const currentContent = cachedContent !== undefined ? cachedContent : 
+                                 await RepositoryCache.getInstance().getFileContent(path);
+
+          // Duplicate Read Protection
+          if (lastReadContent.has(path) && lastReadContent.get(path) === currentContent) {
+            agentOutputChannel.appendLine(`[Duplicate Read Protection] File already reviewed: ${path}`);
+            agentState.finishHints++;
+            return {
+              tool: tc.tool,
+              success: true,
+              content: `${currentContent}\n\nThis file has not changed since your previous read.\n\nConsider whether additional edits are necessary.`
+            };
+          }
+
+          // Cache Hit for recently modified files
+          if (agentState.recentlyModifiedFiles.includes(path) && cachedContent !== undefined) {
+            agentOutputChannel.appendLine(`[Cache Hit] Returning cached content for recently modified file: ${path}`);
+            lastReadContent.set(path, currentContent);
+            return {
+              tool: tc.tool,
+              success: true,
+              content: cachedContent
+            };
+          }
+          
+          lastReadContent.set(path, currentContent);
+        }
       }
 
       agentOutputChannel.appendLine(
@@ -207,8 +337,28 @@ Rules:
         const resultStr =
           typeof result === "string" ? result : JSON.stringify(result, null, 2);
 
-        if (tc.tool === "write_file" || tc.tool === "create_file" || tc.tool === "patch_file") {
+        // Detect No-Op replacement
+        let isNoOp = false;
+        if (tc.tool === "replace_in_file" && resultStr.includes("NO_CHANGES_REQUIRED")) {
+          isNoOp = true;
+        }
+
+        if ((tc.tool === "write_file" || tc.tool === "create_file" || tc.tool === "replace_in_file") && !isNoOp) {
           filesModified = true;
+          const file = tc.args?.path || "";
+          if (tc.tool === "replace_in_file" && tc.args && typeof tc.args.search === "string" && typeof tc.args.replace === "string") {
+            editRecords.push({
+              file,
+              tool: tc.tool,
+              searchHash: hashString(tc.args.search),
+              replaceHash: hashString(tc.args.replace),
+            });
+          } else {
+            editRecords.push({
+              file,
+              tool: tc.tool,
+            });
+          }
         }
 
         return { tool: tc.tool, success: true, content: resultStr };
@@ -223,7 +373,69 @@ Rules:
 
     const results = await Promise.all(executionPromises);
 
-    const combinedResponses = results
+    // Track steps modified file for repeated edits detection
+    let stepModifiedFile: string | null = null;
+    let stepModifiedFiles = false;
+
+    // Update AgentState based on tool call results
+    for (let i = 0; i < toolCalls.length; i++) {
+      const tc = toolCalls[i];
+      const res = results[i];
+      if (!res.success) {
+        continue;
+      }
+
+      if (tc.tool === "list_workspace_files") {
+        try {
+          const parsed = JSON.parse(res.content);
+          if (Array.isArray(parsed)) {
+            agentState.discoveredFiles = Array.from(new Set([...agentState.discoveredFiles, ...parsed]));
+          }
+        } catch {
+          // ignore
+        }
+      } else if (tc.tool === "read_file" || tc.tool === "write_file" || tc.tool === "create_file" || tc.tool === "replace_in_file") {
+        if (tc.args && typeof tc.args.path === "string") {
+          const path = tc.args.path;
+          if (!agentState.openedFiles.includes(path)) {
+            agentState.openedFiles.push(path);
+          }
+          if (tc.tool === "write_file" || tc.tool === "create_file" || tc.tool === "replace_in_file") {
+            const isNoOp = res.content.includes("NO_CHANGES_REQUIRED");
+            if (!isNoOp) {
+              stepModifiedFile = path;
+              stepModifiedFiles = true;
+              if (!modifiedFiles.includes(path)) {
+                modifiedFiles.push(path);
+              }
+              if (!agentState.recentlyModifiedFiles.includes(path)) {
+                agentState.recentlyModifiedFiles.push(path);
+              }
+              if (!agentState.modifiedFiles.includes(path)) {
+                agentState.modifiedFiles.push(path);
+              }
+            }
+          }
+        }
+      } else if (tc.tool === "search_symbols") {
+        if (tc.args && typeof tc.args.query === "string") {
+          if (!agentState.searchResults.includes(tc.args.query)) {
+            agentState.searchResults.push(tc.args.query);
+          }
+        }
+        try {
+          const parsed = JSON.parse(res.content);
+          if (Array.isArray(parsed)) {
+            const symbols = parsed.map((item: any) => item.symbol).filter(Boolean);
+            agentState.discoveredSymbols = Array.from(new Set([...agentState.discoveredSymbols, ...symbols]));
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    let combinedResponses = results
       .map((r, i) => {
         agentOutputChannel.appendLine(
           `[Tool #${i + 1} Response] ${r.success ? "Finished" : "Failed"}`,
@@ -231,6 +443,75 @@ Rules:
         return `Response from Tool #${i + 1} (${r.tool}):\n${r.content}`;
       })
       .join("\n\n");
+
+    // Run build check if files were modified to keep errors updated in AgentState
+    if (stepModifiedFiles && validationRetries < maxValidationRetries) {
+      const buildResult = await validateBuild(modifiedFiles);
+      if (!buildResult.success) {
+        validationRetries++;
+        const compressedErrors = extractBuildErrors(
+          (buildResult.stdout || "") + "\n" + (buildResult.stderr || ""),
+        );
+        agentState.buildErrors = [compressedErrors];
+      } else {
+        agentState.buildErrors = [];
+        // build passes after successful modifications -> increment finishHints
+        agentState.finishHints++;
+        agentOutputChannel.appendLine(`[Heuristic] Build passed after modifications. finishHints = ${agentState.finishHints}`);
+      }
+    }
+
+    // Heuristics and Warnings
+    const warnings: string[] = [];
+
+    if (stepModifiedFiles && agentState.buildErrors.length === 0) {
+      // 1. Loop pattern detection (at count >= 3)
+      for (const path of agentState.modifiedFiles) {
+        const fileEdits = editRecords.filter(r => r.file === path);
+        if (fileEdits.length >= 3 && detectLoopPattern(fileEdits)) {
+          agentState.finishHints++;
+          warnings.push(`\nThe file has already been modified multiple times.\n\nIf the request is satisfied, call finish.`);
+          agentOutputChannel.appendLine(`[Loop Detection] Loop pattern detected on ${path}. finishHints = ${agentState.finishHints}`);
+          break; // show warning once
+        }
+      }
+
+      // 2. Per-file modification budget (at count >= 5)
+      for (const path of agentState.modifiedFiles) {
+        const fileEdits = editRecords.filter(r => r.file === path);
+        if (fileEdits.length >= 5) {
+          agentState.finishHints++;
+          warnings.push(`\nThis file has already been modified multiple times.\n\nIf the request has been completed,\ncall finish.\n\nIf additional changes are required,\nexplain why.`);
+          agentOutputChannel.appendLine(`[Budget Warning] Per-file budget met/exceeded on ${path} (${fileEdits.length} edits). finishHints = ${agentState.finishHints}`);
+          break; // show warning once
+        }
+      }
+
+      // 3. Global modification budget (at total edits >= 15)
+      if (editRecords.length >= 15) {
+        agentState.finishHints++;
+        warnings.push(`\nThe maximum total modification budget of 15 has been reached.\n\nIf the request has been completed,\ncall finish.\n\nIf additional changes are required,\nexplain why.`);
+        agentOutputChannel.appendLine(`[Budget Warning] Global budget met/exceeded (${editRecords.length} edits). finishHints = ${agentState.finishHints}`);
+      }
+    }
+
+    // 4. Completion Reminder Heuristic
+    if (
+      agentState.buildErrors.length === 0 &&
+      agentState.modifiedFiles.length > 0 &&
+      agentState.completedObjectives.length > 0
+    ) {
+      warnings.push(`\nThe request may be completed.\n\nIf all requested objectives have been addressed,\ncall finish.`);
+    }
+
+    // 5. Multiple signals / finishHints warning
+    if (agentState.finishHints >= 3) {
+      warnings.push(`\nMultiple signals indicate the task may already be complete.\n\nPrefer calling finish unless additional changes are strictly required.`);
+    }
+
+    if (warnings.length > 0) {
+      combinedResponses += "\n" + warnings.join("\n");
+    }
 
     // Add interaction to context manager
     contextManager.addInteraction(responseText, combinedResponses);

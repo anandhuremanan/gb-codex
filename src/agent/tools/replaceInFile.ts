@@ -2,13 +2,34 @@ import * as vscode from "vscode";
 import { Tool } from "../types";
 import { RepositoryCache } from "../cache";
 
-export class PatchFileTool implements Tool {
-  name = "patch_file";
-  description = "Apply a search-and-replace patch to an existing file in the workspace. Arguments: { \"path\": \"relative/path/to/file\", \"search\": \"exact text block to replace\", \"replace\": \"replacement text block\" }";
+export class ReplaceInFileTool implements Tool {
+  name = "replace_in_file";
+  description = "Apply a search-and-replace edit to an existing file in the workspace. Arguments: { \"path\": \"relative/path/to/file\", \"search\": \"exact text block to replace\", \"replace\": \"replacement text block\" }";
+  schema = {
+    type: "object",
+    properties: {
+      path: {
+        type: "string",
+        description: "Relative path to the file to modify"
+      },
+      search: {
+        type: "string",
+        description: "The exact code block to search for and replace"
+      },
+      replace: {
+        type: "string",
+        description: "The new replacement code block"
+      }
+    },
+    required: ["path", "search", "replace"]
+  };
 
-  async execute(args: { path: string; search: string; replace: string }): Promise<{ success: boolean; message: string }> {
+  async execute(args: { path: string; search: string; replace: string }): Promise<{ success: boolean; message: string } | string> {
     if (!args || typeof args.path !== "string" || typeof args.search !== "string" || typeof args.replace !== "string") {
       throw new Error("Invalid arguments: 'path', 'search', and 'replace' must be strings.");
+    }
+    if (args.search === args.replace) {
+      return "NO_CHANGES_REQUIRED";
     }
     const root = vscode.workspace.workspaceFolders?.[0]?.uri;
     if (!root) {
@@ -59,7 +80,12 @@ export class PatchFileTool implements Tool {
     if (applied) {
       await doc.save();
       RepositoryCache.getInstance().setFileContent(args.path, doc.getText());
-      return { success: true, message: `Successfully patched ${args.path}` };
+      
+      // Structured tool success feedback
+      return {
+        success: true,
+        message: `SUCCESS\nTool: replace_in_file\nFile: ${args.path}\nOperation: Patched\nCharacters Written: ${args.replace.length}`
+      };
     } else {
       return { success: false, message: `Failed to apply workspace edit to ${args.path}` };
     }

@@ -18,7 +18,7 @@ export async function analyzeRepository(): Promise<RepositoryProfile> {
 
   // Find all config files in the root folder to be fast
   const files = await vscode.workspace.findFiles(
-    "{package.json,tsconfig.json,go.mod,requirements.txt,pyproject.toml,Cargo.toml,pom.xml,build.gradle,*.sln,*.csproj}",
+    "{package.json,tsconfig.json,go.mod,requirements.txt,pyproject.toml,Cargo.toml,pom.xml,build.gradle,*.sln,*.csproj,index.html}",
     "**/node_modules/**",
     10
   );
@@ -184,6 +184,13 @@ export async function analyzeRepository(): Promise<RepositoryProfile> {
     profile.packageManager = "nuget";
     profile.buildCommand = "dotnet build";
     profile.testCommand = "dotnet test";
+    return profile;
+  }
+
+  // 7. Static Website / HTML
+  if (filenames.includes("index.html")) {
+    profile.language = "HTML";
+    profile.framework = "Static Website";
     return profile;
   }
 

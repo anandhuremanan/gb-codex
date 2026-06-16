@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as path from "path";
 import { RepositoryProfile, analyzeRepository } from "./analyzer";
-import { SymbolIndex } from "./symbols";
+import { SymbolIndex } from "./tools/searchSymbols";
 
 export class RepositoryCache {
   private static instance: RepositoryCache;
@@ -24,6 +24,8 @@ export class RepositoryCache {
     return RepositoryCache.instance;
   }
 
+  private reindexTimeout?: NodeJS.Timeout;
+
   public async initialize(force = false): Promise<void> {
     if (this.isInitialized && !force) {
       return;
@@ -39,26 +41,6 @@ export class RepositoryCache {
     // 2. Perform Repository Analysis
     this.profile = await analyzeRepository();
 
-    // 3. Populate File Contents and Symbol Index
-    // Limit indexing of code files initially to avoid heavy memory footprints on very large projects.
-    const codeFiles = files.filter(f => {
-      const ext = path.extname(f.fsPath).toLowerCase();
-      return [".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs", ".java", ".cs"].includes(ext);
-    });
-
-    const filesToIndex = codeFiles.slice(0, 500);
-    for (const file of filesToIndex) {
-      try {
-        const relPath = vscode.workspace.asRelativePath(file);
-        const bytes = await vscode.workspace.fs.readFile(file);
-        const content = new TextDecoder("utf8").decode(bytes);
-        this.fileContents.set(relPath, content);
-        this.symbolIndex.indexFile(relPath, content);
-      } catch {
-        // ignore read/parse errors
-      }
-    }
-
     this.isInitialized = true;
   }
 
@@ -68,6 +50,10 @@ export class RepositoryCache {
 
   public getProfile(): RepositoryProfile {
     return this.profile || { language: "Unknown" };
+  }
+
+  public getCachedFileContents(): Map<string, string> {
+    return this.fileContents;
   }
 
   public async getFileContent(filePath: string): Promise<string> {
@@ -100,6 +86,24 @@ export class RepositoryCache {
 
   public getSymbolIndex(): SymbolIndex {
     return this.symbolIndex;
+  }
+
+  public scheduleReindex(): void {
+    if (this.reindexTimeout) {
+      clearTimeout(this.reindexTimeout);
+    }
+    this.reindexTimeout = setTimeout(async () => {
+      try {
+        const files = await vscode.workspace.findFiles(
+          "**/*",
+          "{**/node_modules/**,**/dist/**,**/build/**,**/.git/**}"
+        );
+        this.workspaceTree = files.map(f => vscode.workspace.asRelativePath(f));
+        this.profile = await analyzeRepository();
+      } catch {
+        // ignore
+      }
+    }, 2000);
   }
 
   private setupListeners() {
@@ -135,6 +139,7 @@ export class RepositoryCache {
           this.workspaceTree.push(relPath);
         }
       }
+      this.scheduleReindex();
     });
 
     // 3. Deleted files
@@ -144,6 +149,7 @@ export class RepositoryCache {
         this.workspaceTree = this.workspaceTree.filter(p => p !== relPath);
         this.fileContents.delete(relPath);
       }
+      this.scheduleReindex();
     });
   }
 }

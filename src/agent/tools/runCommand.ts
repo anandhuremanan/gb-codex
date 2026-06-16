@@ -5,6 +5,16 @@ import { Tool } from "../types";
 export class RunTerminalCommandTool implements Tool {
   name = "run_terminal_command";
   description = "Run a shell command in the workspace root. Arguments: { \"command\": \"command string\" }";
+  schema = {
+    type: "object",
+    properties: {
+      command: {
+        type: "string",
+        description: "The terminal command to execute in the workspace root"
+      }
+    },
+    required: ["command"]
+  };
 
   async execute(args: { command: string }): Promise<{ stdout: string; stderr: string; code: number }> {
     if (!args || typeof args.command !== "string") {

@@ -5,6 +5,20 @@ import { RepositoryCache } from "../cache";
 export class WriteFileTool implements Tool {
   name = "write_file";
   description = "Edit/write content to a file in the workspace. Arguments: { \"path\": \"relative/path/to/file\", \"content\": \"updated content\" }";
+  schema = {
+    type: "object",
+    properties: {
+      path: {
+        type: "string",
+        description: "Relative path to the file to write"
+      },
+      content: {
+        type: "string",
+        description: "Complete content of the file to write"
+      }
+    },
+    required: ["path", "content"]
+  };
 
   async execute(args: { path: string; content: string }): Promise<{ success: boolean; message: string }> {
     if (!args || typeof args.path !== "string" || typeof args.content !== "string") {
@@ -28,7 +42,10 @@ export class WriteFileTool implements Tool {
         doc = await vscode.workspace.openTextDocument(uri);
         await doc.save();
         RepositoryCache.getInstance().setFileContent(args.path, args.content);
-        return { success: true, message: `Created and wrote to ${args.path}` };
+        return {
+          success: true,
+          message: `SUCCESS\nTool: write_file\nFile: ${args.path}\nOperation: Updated\nCharacters Written: ${args.content.length}`
+        };
       }
       throw new Error(`File does not exist and failed to create: ${err}`);
     }
@@ -62,7 +79,10 @@ export class WriteFileTool implements Tool {
     if (applied) {
       await doc.save();
       RepositoryCache.getInstance().setFileContent(args.path, args.content);
-      return { success: true, message: `Successfully updated ${args.path} with minimal edits.` };
+      return {
+        success: true,
+        message: `SUCCESS\nTool: write_file\nFile: ${args.path}\nOperation: Updated\nCharacters Written: ${args.content.length}`
+      };
     } else {
       return { success: false, message: `Failed to apply workspace edit to ${args.path}.` };
     }
