@@ -1,4 +1,6 @@
 import { Message, AgentState } from "./types";
+import { AgentSessionManager } from "./sessionManager";
+import { RepositoryCache } from "./cache";
 
 export class PromptBudgetManager {
   private static MAX_CONTEXT_TOKENS = 3000;
@@ -15,27 +17,56 @@ export class PromptBudgetManager {
 
     // Initial copies
     let currentHistory = history.map(h => ({ ...h }));
-    let currentSearchResults = [...state.searchResults];
 
     while (true) {
-      // Build Agent State Summary (excluding build errors as they are appended separately if present)
-      const searchResultsStr = currentSearchResults.length > 0
-        ? `Search Results: ${currentSearchResults.join("; ")}`
-        : "";
+      const session = AgentSessionManager.getInstance().getSession();
+      const taskMemory = session.taskMemory;
+      const sessionMemory = session.sessionMemory;
+      const profile = RepositoryCache.getInstance().getProfile();
 
-      const stateSummaryParts = [
-        `Discovered Files: ${state.discoveredFiles.slice(0, 10).join(", ")}${state.discoveredFiles.length > 10 ? `... (+${state.discoveredFiles.length - 10} more)` : ""}`,
-        `Opened Files: ${state.openedFiles.join(", ")}`,
-        `Modified Files: ${state.modifiedFiles.join(", ")}`,
-        `Completed Objectives:\n${state.completedObjectives.map(o => `✓ ${o}`).join("\n")}`,
-        `Discovered Symbols: ${state.discoveredSymbols.slice(0, 15).join(", ")}${state.discoveredSymbols.length > 15 ? `... (+${state.discoveredSymbols.length - 15} more)` : ""}`,
-        searchResultsStr
-      ].filter(Boolean);
+      const repoStr = `Repository:
 
-      const agentStateSummary = `### Agent State Summary\n${stateSummaryParts.join("\n")}`;
+Language:
+${profile.language}
 
-      // Build Preserved Base Message
-      const preservedUserContent = `Repository Profile:\n${repoProfile}\n\nUser Request: ${currentRequest}\n\n${agentStateSummary}${
+Framework:
+${profile.framework || "None"}`;
+
+      const goalStr = `Current Goal:
+${taskMemory.currentGoal || currentRequest}`;
+
+      const taskMemoryStr = `Active Files:
+${taskMemory.activeFiles.map(f => `- ${f}`).join("\n") || "None"}
+
+Related Files:
+${taskMemory.relatedFiles.map(f => `- ${f}`).join("\n") || "None"}
+
+Already Reviewed:
+${taskMemory.visitedFiles.map(f => `- ${f}`).join("\n") || "None"}
+
+Rejected Files:
+${taskMemory.rejectedFiles.map(f => `- ${f}`).join("\n") || "None"}
+
+Completed Actions:
+${taskMemory.completedActions.map(a => `✓ ${a}`).join("\n") || "None"}`;
+
+      // Inject at most MAX_SESSION_SUMMARIES_IN_PROMPT = 3
+      const recentWorkStr = `Recent Work:
+${sessionMemory.recentTasks.map(t => `✓ ${t.goal}`).slice(0, 3).join("\n") || "None"}`;
+
+      const requestStr = `User Request:
+${currentRequest}`;
+
+      // Build Preserved Base Message in the new structured format
+      const preservedUserContent = `${repoStr}
+
+${goalStr}
+
+${taskMemoryStr}
+
+${recentWorkStr}
+
+${requestStr}${
         state.buildErrors.length > 0 ? `\n\nBuild Errors:\n${state.buildErrors.join("\n")}` : ""
       }`;
 
@@ -52,8 +83,6 @@ export class PromptBudgetManager {
         return messages;
       }
 
-      // --- Trimming Protocol in Priority Order ---
-
       // Step 1: Trim Older Interactions
       // Drop older assistant+user pairs, keeping only the very latest interaction (history.length <= 2)
       if (currentHistory.length > 2) {
@@ -61,18 +90,7 @@ export class PromptBudgetManager {
         continue;
       }
 
-      // Step 2: Trim Search Results
-      if (currentSearchResults.length > 0) {
-        currentSearchResults = [];
-        continue;
-      }
-
-      // Step 3: Stop Truncating Active Context
-      // The only history messages left are the latest interaction (at most 2 messages).
-      // The very last message in currentHistory represents the current tool response / active file.
-      // According to the requirements, we should NOT truncate this current tool response/file content.
-      // So we return the messages as is, even if they slightly exceed MAX_CHARS,
-      // because we must never truncate active files, build errors, or current responses.
+      // Step 2: Stop Truncating Active Context
       return messages;
     }
   }

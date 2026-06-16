@@ -1,3 +1,5 @@
+import * as vscode from "vscode";
+
 export interface Tool {
   name: string;
   description: string;
@@ -25,4 +27,49 @@ export interface AgentState {
   openedFiles: string[];
   discoveredSymbols: string[];
   finishHints: number;
+}
+
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+export interface TaskMemory {
+  currentGoal: string;
+  activeFiles: string[];
+  relatedFiles: string[];
+  visitedFiles: string[];
+  visitedQueries: string[];
+  discoveredFacts: string[];
+  completedActions: string[];
+  createdFiles: string[];
+  modifiedFiles: string[];
+  rejectedFiles: string[];
+}
+
+export interface SessionTaskSummary {
+  goal: string;
+  summary: string;
+  modifiedFiles: string[];
+  createdFiles: string[];
+  timestamp: number;
+}
+
+export interface SessionMemory {
+  workspaceId: string;
+  workspacePathHash: string;
+  recentTasks: SessionTaskSummary[];
+  lastUpdated: number;
+}
+
+export interface RunningAgent {
+  cancellationSource: vscode.CancellationTokenSource;
+  promise: Promise<void>;
+}
+
+export interface AgentSession {
+  taskMemory: TaskMemory;
+  sessionMemory: SessionMemory;
+  chatHistory: ChatMessage[];
+  currentExecution?: RunningAgent;
 }

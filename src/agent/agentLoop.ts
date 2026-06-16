@@ -5,6 +5,7 @@ import { validateBuild } from "./validator";
 import { RepositoryCache } from "./cache";
 import { ContextManager } from "./context";
 import { extractBuildErrors } from "./errorExtractor";
+import { AgentSessionManager } from "./sessionManager";
 
 export interface AgentProgress {
   notify(text: string): void;
@@ -109,12 +110,64 @@ function detectLoopPattern(fileEdits: EditRecord[]): boolean {
   return false;
 }
 
+function extractRejectedFiles(response: string): string[] {
+  try {
+    const jsonBlockRegex = /```(?:json)?\n([\s\S]*?)```/i;
+    const match = response.match(jsonBlockRegex);
+    const textToParse = match ? match[1].trim() : response.trim();
+
+    const firstCurly = textToParse.indexOf("{");
+    const firstBracket = textToParse.indexOf("[");
+
+    let startIdx = -1;
+    let endIdx = -1;
+
+    if (firstBracket !== -1 && (firstCurly === -1 || firstBracket < firstCurly)) {
+      startIdx = firstBracket;
+      endIdx = textToParse.lastIndexOf("]");
+    } else {
+      startIdx = firstCurly;
+      endIdx = textToParse.lastIndexOf("}");
+    }
+
+    if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+      const jsonCandidate = textToParse.slice(startIdx, endIdx + 1);
+      const parsed = JSON.parse(jsonCandidate);
+      if (parsed && typeof parsed === "object") {
+        if (Array.isArray(parsed.rejectedFiles)) {
+          return parsed.rejectedFiles.map((f: any) => String(f));
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
 export async function runAgent(
   userRequest: string,
   progress: AgentProgress,
   token?: vscode.CancellationToken,
 ): Promise<string> {
   const tools = globalRegistry.getTools();
+
+  // Reset TaskMemory for this execution run (RequestGoal is per execution)
+  const session = AgentSessionManager.getInstance().getSession();
+  session.taskMemory = {
+    currentGoal: userRequest,
+    activeFiles: [],
+    relatedFiles: [],
+    visitedFiles: [],
+    visitedQueries: [],
+    discoveredFacts: [],
+    completedActions: [],
+    createdFiles: [],
+    modifiedFiles: [],
+    rejectedFiles: [],
+  };
+
+  const taskMemory = session.taskMemory;
 
   // Initialize AgentState (scoped to this session run only)
   const agentState: AgentState = {
@@ -132,6 +185,11 @@ export async function runAgent(
   const modifiedFiles: string[] = [];
   const lastReadContent = new Map<string, string>();
   const editRecords: EditRecord[] = [];
+  let discoveryStepsCount = 0;
+
+  // Set of requested files/searches in this run for repeated discovery detection
+  const requestedFilesInThisRun = new Set<string>();
+  const requestedQueriesInThisRun = new Set<string>();
 
   // Show and clear debug output channel
   agentOutputChannel.show(true);
@@ -161,12 +219,15 @@ Never invent tool names.
 
 Rules:
 1. You MUST respond in a single valid JSON block containing either a tool call, a list of tool calls, or the final answer.
-2. In your JSON response, you can optionally include a 'completedObjectives' array of strings listing the objectives/tasks you have completed in this turn.
+2. In your JSON response, you can optionally include:
+   - a 'completedObjectives' array of strings listing the objectives/tasks you have completed in this turn.
+   - a 'rejectedFiles' array of strings containing relative paths of files you investigated and determined are NOT relevant to the task.
 Example format:
 {
   "tool": "replace_in_file",
   "args": { ... },
-  "completedObjectives": ["Applied yellow/black theme", "Updated hero section"]
+  "completedObjectives": ["Applied yellow/black theme"],
+  "rejectedFiles": ["src/auth.ts"]
 }
 3. Do not output any conversational chat, explanation, or markdown outside the JSON block.
 4. Every turn you can call ONE or MULTIPLE tools in parallel. To call multiple tools, output a JSON array of tool call objects.
@@ -242,6 +303,16 @@ Finish should be preferred over further refinement.
       if (!agentState.completedObjectives.includes(obj)) {
         agentState.completedObjectives.push(obj);
       }
+      if (!taskMemory.completedActions.includes(obj)) {
+        taskMemory.completedActions.push(obj);
+      }
+    }
+
+    const rejected = extractRejectedFiles(responseText);
+    for (const file of rejected) {
+      if (!taskMemory.rejectedFiles.includes(file)) {
+        taskMemory.rejectedFiles.push(file);
+      }
     }
 
     const extracted = extractToolCalls(responseText);
@@ -267,6 +338,37 @@ Finish should be preferred over further refinement.
     const finishCall = toolCalls.find((tc) => tc.tool === "finish");
     if (finishCall) {
       const summaryMsg = finishCall.args.summary || JSON.stringify(finishCall.args);
+      
+      // Auto-summarize and save to SessionMemory
+      const completedList = taskMemory.completedActions.map(a => `✓ ${a}`).join("\n");
+      const modifiedList = taskMemory.modifiedFiles.map(f => `- ${f}`).join("\n");
+      const createdList = taskMemory.createdFiles.map(f => `- ${f}`).join("\n");
+
+      const taskSummaryText = `Goal:
+${taskMemory.currentGoal}
+
+Completed:
+${completedList || "None"}
+
+Modified:
+${modifiedList || "None"}
+
+Created:
+${createdList || "None"}`;
+
+      const sessionMemory = session.sessionMemory;
+      sessionMemory.recentTasks.unshift({
+        goal: taskMemory.currentGoal,
+        summary: taskSummaryText,
+        modifiedFiles: [...taskMemory.modifiedFiles],
+        createdFiles: [...taskMemory.createdFiles],
+        timestamp: Date.now(),
+      });
+      if (sessionMemory.recentTasks.length > 20) {
+        sessionMemory.recentTasks = sessionMemory.recentTasks.slice(0, 20);
+      }
+      await AgentSessionManager.getInstance().saveSessionMemory();
+
       progress.notify("Complete.");
       agentOutputChannel.appendLine(
         `\n[Finished] Completed request with finish tool: ${summaryMsg}`,
@@ -290,6 +392,43 @@ Finish should be preferred over further refinement.
       }
 
       const tool = globalRegistry.getTool(tc.tool)!;
+
+      // Check Discovery Budget (list_workspace_files, search_symbols, read_file)
+      const isDiscovery = (tc.tool === "list_workspace_files" || tc.tool === "search_symbols" || tc.tool === "read_file");
+      if (isDiscovery) {
+        if (discoveryStepsCount >= 10) {
+          agentOutputChannel.appendLine(`[Discovery Budget Exceeded] Blocking execution of: ${tc.tool}`);
+          return {
+            tool: tc.tool,
+            success: true,
+            content: `You have exceeded the discovery budget.\n\nChoose one:\n1. Modify files\n2. Create files\n3. Finish\n\nDo not continue discovery.`
+          };
+        }
+        discoveryStepsCount++;
+        agentOutputChannel.appendLine(`[Discovery Budget] Count: ${discoveryStepsCount}`);
+      }
+
+      // Check Repeated Discovery
+      let isRepeated = false;
+      if (tc.tool === "read_file" && tc.args && typeof tc.args.path === "string") {
+        const path = tc.args.path;
+        if (taskMemory.visitedFiles.includes(path) || requestedFilesInThisRun.has(path)) {
+          isRepeated = true;
+        } else {
+          requestedFilesInThisRun.add(path);
+        }
+      } else if (tc.tool === "search_symbols" && tc.args && typeof tc.args.query === "string") {
+        const query = tc.args.query;
+        if (taskMemory.visitedQueries.includes(query) || requestedQueriesInThisRun.has(query)) {
+          isRepeated = true;
+        } else {
+          requestedQueriesInThisRun.add(query);
+        }
+      }
+      if (isRepeated) {
+        agentState.finishHints++;
+        agentOutputChannel.appendLine(`[Repeated Discovery Detected] finishHints = ${agentState.finishHints}`);
+      }
 
       // Scoped Cache Hit & Duplicate Read Protection
       if (tc.tool === "read_file") {
@@ -377,7 +516,7 @@ Finish should be preferred over further refinement.
     let stepModifiedFile: string | null = null;
     let stepModifiedFiles = false;
 
-    // Update AgentState based on tool call results
+    // Update AgentState and TaskMemory based on tool call results
     for (let i = 0; i < toolCalls.length; i++) {
       const tc = toolCalls[i];
       const res = results[i];
@@ -400,6 +539,21 @@ Finish should be preferred over further refinement.
           if (!agentState.openedFiles.includes(path)) {
             agentState.openedFiles.push(path);
           }
+
+          // Update TaskMemory
+          if (tc.tool === "read_file") {
+            if (!taskMemory.visitedFiles.includes(path)) {
+              taskMemory.visitedFiles.push(path);
+            }
+            if (!taskMemory.activeFiles.includes(path)) {
+              taskMemory.activeFiles.push(path);
+            }
+          } else if (tc.tool === "create_file") {
+            if (!taskMemory.createdFiles.includes(path)) {
+              taskMemory.createdFiles.push(path);
+            }
+          }
+
           if (tc.tool === "write_file" || tc.tool === "create_file" || tc.tool === "replace_in_file") {
             const isNoOp = res.content.includes("NO_CHANGES_REQUIRED");
             if (!isNoOp) {
@@ -414,13 +568,22 @@ Finish should be preferred over further refinement.
               if (!agentState.modifiedFiles.includes(path)) {
                 agentState.modifiedFiles.push(path);
               }
+
+              // Update TaskMemory modifiedFiles
+              if (!taskMemory.modifiedFiles.includes(path)) {
+                taskMemory.modifiedFiles.push(path);
+              }
             }
           }
         }
       } else if (tc.tool === "search_symbols") {
         if (tc.args && typeof tc.args.query === "string") {
-          if (!agentState.searchResults.includes(tc.args.query)) {
-            agentState.searchResults.push(tc.args.query);
+          const query = tc.args.query;
+          if (!agentState.searchResults.includes(query)) {
+            agentState.searchResults.push(query);
+          }
+          if (!taskMemory.visitedQueries.includes(query)) {
+            taskMemory.visitedQueries.push(query);
           }
         }
         try {
@@ -428,6 +591,13 @@ Finish should be preferred over further refinement.
           if (Array.isArray(parsed)) {
             const symbols = parsed.map((item: any) => item.symbol).filter(Boolean);
             agentState.discoveredSymbols = Array.from(new Set([...agentState.discoveredSymbols, ...symbols]));
+
+            // Update TaskMemory relatedFiles
+            for (const item of parsed) {
+              if (item.file && !taskMemory.relatedFiles.includes(item.file)) {
+                taskMemory.relatedFiles.push(item.file);
+              }
+            }
           }
         } catch {
           // ignore
@@ -464,8 +634,32 @@ Finish should be preferred over further refinement.
     // Heuristics and Warnings
     const warnings: string[] = [];
 
+    // 1. Discovery Budget Warning (at 5)
+    if (discoveryStepsCount >= 5 && discoveryStepsCount < 10) {
+      warnings.push(`\nYou have already reviewed sufficient repository context.\n\nProceed with implementation unless new information is required.`);
+    }
+
+    // 2. Repeated Discovery Warning
+    let stepHasRepeated = false;
+    for (const tc of toolCalls) {
+      if (tc.tool === "read_file" && tc.args && typeof tc.args.path === "string") {
+        const path = tc.args.path;
+        if (taskMemory.visitedFiles.includes(path)) {
+          stepHasRepeated = true;
+        }
+      } else if (tc.tool === "search_symbols" && tc.args && typeof tc.args.query === "string") {
+        const query = tc.args.query;
+        if (taskMemory.visitedQueries.includes(query)) {
+          stepHasRepeated = true;
+        }
+      }
+    }
+    if (stepHasRepeated) {
+      warnings.push(`\nYou have already reviewed these files and searches.\n\nChoose one:\n\n1. Modify files\n2. Create files\n3. Finish\n\nDo not continue discovery.`);
+    }
+
     if (stepModifiedFiles && agentState.buildErrors.length === 0) {
-      // 1. Loop pattern detection (at count >= 3)
+      // 3. Loop pattern detection (at count >= 3)
       for (const path of agentState.modifiedFiles) {
         const fileEdits = editRecords.filter(r => r.file === path);
         if (fileEdits.length >= 3 && detectLoopPattern(fileEdits)) {
@@ -476,7 +670,7 @@ Finish should be preferred over further refinement.
         }
       }
 
-      // 2. Per-file modification budget (at count >= 5)
+      // 4. Per-file modification budget (at count >= 5)
       for (const path of agentState.modifiedFiles) {
         const fileEdits = editRecords.filter(r => r.file === path);
         if (fileEdits.length >= 5) {
@@ -487,7 +681,7 @@ Finish should be preferred over further refinement.
         }
       }
 
-      // 3. Global modification budget (at total edits >= 15)
+      // 5. Global modification budget (at total edits >= 15)
       if (editRecords.length >= 15) {
         agentState.finishHints++;
         warnings.push(`\nThe maximum total modification budget of 15 has been reached.\n\nIf the request has been completed,\ncall finish.\n\nIf additional changes are required,\nexplain why.`);
@@ -495,7 +689,7 @@ Finish should be preferred over further refinement.
       }
     }
 
-    // 4. Completion Reminder Heuristic
+    // 6. Completion Reminder Heuristic
     if (
       agentState.buildErrors.length === 0 &&
       agentState.modifiedFiles.length > 0 &&
@@ -504,7 +698,7 @@ Finish should be preferred over further refinement.
       warnings.push(`\nThe request may be completed.\n\nIf all requested objectives have been addressed,\ncall finish.`);
     }
 
-    // 5. Multiple signals / finishHints warning
+    // 7. Multiple signals / finishHints warning
     if (agentState.finishHints >= 3) {
       warnings.push(`\nMultiple signals indicate the task may already be complete.\n\nPrefer calling finish unless additional changes are strictly required.`);
     }
