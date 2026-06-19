@@ -1,6 +1,8 @@
 import * as vscode from "vscode";
 import { ChatViewProvider } from "./chatView";
 
+// G3@QB
+
 export function activate(context: vscode.ExtensionContext) {
   const provider = new ChatViewProvider(context.extensionUri);
 
