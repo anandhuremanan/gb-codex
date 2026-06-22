@@ -3,7 +3,17 @@
   "displayName": "GBS SE Agent",
   "description": "a local software agent",
   "publisher": "gbs-internal-toolchain",
-  "version": "0.0.2",
+  "icon": "assets/icon.png",
+  "license": "MIT",
+  "galleryBanner": {
+    "color": "#0f172a",
+    "theme": "dark"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/anandhuremanan/gb-codex"
+  },
+  "version": "0.0.5",
   "engines": {
     "vscode": "^1.120.0"
   },
