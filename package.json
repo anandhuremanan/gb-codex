@@ -55,6 +55,16 @@
           "name": "Chat"
         }
       ]
+    },
+    "configuration": {
+      "title": "GBS Agent",
+      "properties": {
+        "gbsAgent.huggingfaceToken": {
+          "type": "string",
+          "default": "",
+          "description": "Your Hugging Face API access token (Read type) for using serverless cloud inference."
+        }
+      }
     }
   },
   "scripts": {

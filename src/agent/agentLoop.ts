@@ -18,9 +18,11 @@ export const agentOutputChannel =
 
 function generateToolsDescription(): string {
   const tools = globalRegistry.getTools();
-  return tools.map((t) => {
-    return `${t.name}\nDescription: ${t.description}\nArguments Schema:\n${JSON.stringify(t.schema, null, 2)}`;
-  }).join("\n\n");
+  return tools
+    .map((t) => {
+      return `${t.name}\nDescription: ${t.description}\nArguments Schema:\n${JSON.stringify(t.schema, null, 2)}`;
+    })
+    .join("\n\n");
 }
 
 function extractCompletedObjectives(response: string): string[] {
@@ -35,7 +37,10 @@ function extractCompletedObjectives(response: string): string[] {
     let startIdx = -1;
     let endIdx = -1;
 
-    if (firstBracket !== -1 && (firstCurly === -1 || firstBracket < firstCurly)) {
+    if (
+      firstBracket !== -1 &&
+      (firstCurly === -1 || firstBracket < firstCurly)
+    ) {
       startIdx = firstBracket;
       endIdx = textToParse.lastIndexOf("]");
     } else {
@@ -52,7 +57,11 @@ function extractCompletedObjectives(response: string): string[] {
         }
         if (Array.isArray(parsed)) {
           for (const item of parsed) {
-            if (item && item.completedObjectives && Array.isArray(item.completedObjectives)) {
+            if (
+              item &&
+              item.completedObjectives &&
+              Array.isArray(item.completedObjectives)
+            ) {
               return item.completedObjectives.map((o: any) => String(o));
             }
           }
@@ -85,7 +94,9 @@ interface EditRecord {
 
 function detectLoopPattern(fileEdits: EditRecord[]): boolean {
   // Only keep edits that have searchHash and replaceHash
-  const sigs = fileEdits.filter(e => e.searchHash !== undefined && e.replaceHash !== undefined);
+  const sigs = fileEdits.filter(
+    (e) => e.searchHash !== undefined && e.replaceHash !== undefined,
+  );
   if (sigs.length < 2) {
     return false;
   }
@@ -93,7 +104,10 @@ function detectLoopPattern(fileEdits: EditRecord[]): boolean {
   // Check for repeated signatures: same searchHash and same replaceHash
   for (let i = 0; i < sigs.length; i++) {
     for (let j = i + 1; j < sigs.length; j++) {
-      if (sigs[i].searchHash === sigs[j].searchHash && sigs[i].replaceHash === sigs[j].replaceHash) {
+      if (
+        sigs[i].searchHash === sigs[j].searchHash &&
+        sigs[i].replaceHash === sigs[j].replaceHash
+      ) {
         return true;
       }
     }
@@ -102,7 +116,10 @@ function detectLoopPattern(fileEdits: EditRecord[]): boolean {
   // Check for reversed/toggling signatures: A -> B and B -> A
   for (let i = 0; i < sigs.length; i++) {
     for (let j = i + 1; j < sigs.length; j++) {
-      if (sigs[i].searchHash === sigs[j].replaceHash && sigs[i].replaceHash === sigs[j].searchHash) {
+      if (
+        sigs[i].searchHash === sigs[j].replaceHash &&
+        sigs[i].replaceHash === sigs[j].searchHash
+      ) {
         return true;
       }
     }
@@ -123,7 +140,10 @@ function extractRejectedFiles(response: string): string[] {
     let startIdx = -1;
     let endIdx = -1;
 
-    if (firstBracket !== -1 && (firstCurly === -1 || firstBracket < firstCurly)) {
+    if (
+      firstBracket !== -1 &&
+      (firstCurly === -1 || firstBracket < firstCurly)
+    ) {
       startIdx = firstBracket;
       endIdx = textToParse.lastIndexOf("]");
     } else {
@@ -151,13 +171,21 @@ function checkAlternatingPattern(history: string[]): boolean {
     return false;
   }
   const last6 = history.slice(-6);
-  const p1 = last6[0] === "list_workspace_files" && last6[1] === "read_file" &&
-    last6[2] === "list_workspace_files" && last6[3] === "read_file" &&
-    last6[4] === "list_workspace_files" && last6[5] === "read_file";
+  const p1 =
+    last6[0] === "list_workspace_files" &&
+    last6[1] === "read_file" &&
+    last6[2] === "list_workspace_files" &&
+    last6[3] === "read_file" &&
+    last6[4] === "list_workspace_files" &&
+    last6[5] === "read_file";
 
-  const p2 = last6[0] === "read_file" && last6[1] === "list_workspace_files" &&
-    last6[2] === "read_file" && last6[3] === "list_workspace_files" &&
-    last6[4] === "read_file" && last6[5] === "list_workspace_files";
+  const p2 =
+    last6[0] === "read_file" &&
+    last6[1] === "list_workspace_files" &&
+    last6[2] === "read_file" &&
+    last6[3] === "list_workspace_files" &&
+    last6[4] === "read_file" &&
+    last6[5] === "list_workspace_files";
 
   return p1 || p2;
 }
@@ -177,11 +205,15 @@ function updatePlanProgress(taskMemory: any, state: AgentState) {
     const desc = subtask.description.toLowerCase();
 
     // Direct match with completedObjectives or completedActions
-    const matchObjective = state.completedObjectives.some((obj: string) => 
-      obj.toLowerCase().includes(desc) || desc.includes(obj.toLowerCase())
-    ) || taskMemory.completedActions.some((act: string) => 
-      act.toLowerCase().includes(desc) || desc.includes(act.toLowerCase())
-    );
+    const matchObjective =
+      state.completedObjectives.some(
+        (obj: string) =>
+          obj.toLowerCase().includes(desc) || desc.includes(obj.toLowerCase()),
+      ) ||
+      taskMemory.completedActions.some(
+        (act: string) =>
+          act.toLowerCase().includes(desc) || desc.includes(act.toLowerCase()),
+      );
 
     if (matchObjective) {
       subtask.completed = true;
@@ -190,28 +222,52 @@ function updatePlanProgress(taskMemory: any, state: AgentState) {
 
     // Keyword checks matching generic template
     if (desc.includes("locate") || desc.includes("find")) {
-      if (taskMemory.visitedFiles.length > 0 || taskMemory.activeFiles.length > 0) {
+      if (
+        taskMemory.visitedFiles.length > 0 ||
+        taskMemory.activeFiles.length > 0
+      ) {
         subtask.completed = true;
         continue;
       }
     }
 
-    if (desc.includes("inspect") || desc.includes("read") || desc.includes("analyze")) {
+    if (
+      desc.includes("inspect") ||
+      desc.includes("read") ||
+      desc.includes("analyze")
+    ) {
       if (taskMemory.visitedFiles.length > 0) {
         subtask.completed = true;
         continue;
       }
     }
 
-    if (desc.includes("modify") || desc.includes("edit") || desc.includes("update") || desc.includes("apply")) {
-      if (taskMemory.modifiedFiles.length > 0 || taskMemory.createdFiles.length > 0) {
+    if (
+      desc.includes("modify") ||
+      desc.includes("edit") ||
+      desc.includes("update") ||
+      desc.includes("apply")
+    ) {
+      if (
+        taskMemory.modifiedFiles.length > 0 ||
+        taskMemory.createdFiles.length > 0
+      ) {
         subtask.completed = true;
         continue;
       }
     }
 
-    if (desc.includes("validate") || desc.includes("compile") || desc.includes("verify") || desc.includes("test")) {
-      if (buildSuccess && (taskMemory.modifiedFiles.length > 0 || taskMemory.createdFiles.length > 0)) {
+    if (
+      desc.includes("validate") ||
+      desc.includes("compile") ||
+      desc.includes("verify") ||
+      desc.includes("test")
+    ) {
+      if (
+        buildSuccess &&
+        (taskMemory.modifiedFiles.length > 0 ||
+          taskMemory.createdFiles.length > 0)
+      ) {
         subtask.completed = true;
         continue;
       }
@@ -221,7 +277,12 @@ function updatePlanProgress(taskMemory: any, state: AgentState) {
       const otherCompleted = taskMemory.plan.subtasks
         .filter((s: any) => s !== subtask)
         .every((s: any) => s.completed);
-      if (otherCompleted && buildSuccess && (taskMemory.modifiedFiles.length > 0 || taskMemory.createdFiles.length > 0)) {
+      if (
+        otherCompleted &&
+        buildSuccess &&
+        (taskMemory.modifiedFiles.length > 0 ||
+          taskMemory.createdFiles.length > 0)
+      ) {
         subtask.completed = true;
       }
     }
@@ -232,6 +293,7 @@ export async function runAgent(
   userRequest: string,
   progress: AgentProgress,
   token?: vscode.CancellationToken,
+  selectedModel: string = "deepseek-v4-flash:cloud",
 ): Promise<string> {
   const tools = globalRegistry.getTools();
 
@@ -255,9 +317,9 @@ export async function runAgent(
         { description: "Inspect implementation", completed: false },
         { description: "Apply modifications", completed: false },
         { description: "Validate changes", completed: false },
-        { description: "Finish", completed: false }
-      ]
-    }
+        { description: "Finish", completed: false },
+      ],
+    },
   };
 
   const taskMemory = session.taskMemory;
@@ -286,6 +348,7 @@ export async function runAgent(
 
   const fileReadCounts = new Map<string, number>();
   const toolCallHistory: string[] = [];
+  const pastExecutions = new Map<string, any>();
 
   // Discovery tool tracking variables
   const discoveryAttempts = new Map<string, number>();
@@ -391,6 +454,7 @@ Finish should be preferred over further refinement.
           agentOutputChannel.append(tokenStr);
         },
         token,
+        selectedModel,
       );
       agentOutputChannel.appendLine("");
     } catch (err) {
@@ -434,7 +498,7 @@ Finish should be preferred over further refinement.
       return responseText;
     }
 
-    const toolCalls = Array.isArray(extracted) ? extracted : [extracted];
+    const toolCalls = extracted;
 
     for (const tc of toolCalls) {
       if (tc.tool === "list_workspace_files" || tc.tool === "read_file") {
@@ -445,12 +509,19 @@ Finish should be preferred over further refinement.
     // Finish Tool termination
     const finishCall = toolCalls.find((tc) => tc.tool === "finish");
     if (finishCall) {
-      const summaryMsg = finishCall.args.summary || JSON.stringify(finishCall.args);
+      const summaryMsg =
+        finishCall.args.summary || JSON.stringify(finishCall.args);
 
       // Auto-summarize and save to SessionMemory
-      const completedList = taskMemory.completedActions.map(a => `✓ ${a}`).join("\n");
-      const modifiedList = taskMemory.modifiedFiles.map(f => `- ${f}`).join("\n");
-      const createdList = taskMemory.createdFiles.map(f => `- ${f}`).join("\n");
+      const completedList = taskMemory.completedActions
+        .map((a) => `✓ ${a}`)
+        .join("\n");
+      const modifiedList = taskMemory.modifiedFiles
+        .map((f) => `- ${f}`)
+        .join("\n");
+      const createdList = taskMemory.createdFiles
+        .map((f) => `- ${f}`)
+        .join("\n");
 
       const taskSummaryText = `Goal:
 ${taskMemory.currentGoal}
@@ -467,7 +538,10 @@ ${createdList || "None"}`;
       const sessionMemory = session.sessionMemory;
       const symbolsTouched: string[] = [];
       const symbolIndex = RepositoryCache.getInstance().getSymbolIndex();
-      const allTouchedFiles = [...taskMemory.modifiedFiles, ...taskMemory.createdFiles];
+      const allTouchedFiles = [
+        ...taskMemory.modifiedFiles,
+        ...taskMemory.createdFiles,
+      ];
       for (const file of allTouchedFiles) {
         symbolsTouched.push(...symbolIndex.getSymbolsForFile(file));
       }
@@ -489,7 +563,7 @@ ${createdList || "None"}`;
       agentOutputChannel.appendLine(
         `\n[Finished] Completed request with finish tool: ${summaryMsg}`,
       );
-      return `SUCCESS: ${summaryMsg}`;
+      return `used model : ${selectedModel}\n\nSUCCESS: ${summaryMsg}`;
     }
 
     // Execute standard tools in parallel
@@ -501,10 +575,27 @@ ${createdList || "None"}`;
     const executionPromises = toolCalls.map(async (tc, index) => {
       // Strict Tool Validation
       if (!globalRegistry.hasTool(tc.tool)) {
-        const available = globalRegistry.getTools().map(t => `- ${t.name}`).join("\n");
+        const available = globalRegistry
+          .getTools()
+          .map((t) => `- ${t.name}`)
+          .join("\n");
         const errMsg = `Error: Tool "${tc.tool}" does not exist. Available Tools:\n${available}`;
         agentOutputChannel.appendLine(`[Error] Invalid tool call: ${tc.tool}`);
         return { tool: tc.tool, success: false, content: errMsg };
+      }
+
+      // Detect repeated tool calls with the same tool + equivalent arguments
+      const argsKey = JSON.stringify({ tool: tc.tool, args: tc.args || {} });
+      if (pastExecutions.has(argsKey)) {
+        const pastRes = pastExecutions.get(argsKey);
+        agentOutputChannel.appendLine(
+          `[Already Done Protection] Tool "${tc.tool}" with same arguments has already been executed successfully. Returning ALREADY_DONE content.`,
+        );
+        return {
+          tool: tc.tool,
+          success: true,
+          content: `${pastRes.content}\n\n[ALREADY_DONE] Note: This action was already successfully executed earlier. No changes were re-applied.`,
+        };
       }
 
       const tool = globalRegistry.getTool(tc.tool)!;
@@ -514,68 +605,101 @@ ${createdList || "None"}`;
         const count = (discoveryAttempts.get(tc.tool) || 0) + 1;
         discoveryAttempts.set(tc.tool, count);
 
-        const workingContext = await ContextRetrievalService.buildWorkingContext(userRequest);
+        const workingContext =
+          await ContextRetrievalService.buildWorkingContext(userRequest);
 
         if (tc.tool === "list_workspace_files") {
           const hasRetrieval = workingContext.relevantFiles.length > 0;
-          const noNewFiles = agentState.discoveredFiles.length <= (lastDiscoveredFilesCount || 0);
-          
+          const noNewFiles =
+            agentState.discoveredFiles.length <=
+            (lastDiscoveredFilesCount || 0);
+
           if (count > 3 && hasRetrieval && noNewFiles) {
-            agentOutputChannel.appendLine(`[Discovery Blocked] list_workspace_files count: ${count}`);
+            agentOutputChannel.appendLine(
+              `[Discovery Blocked] list_workspace_files count: ${count}`,
+            );
             return {
               tool: tc.tool,
               success: true,
-              content: `Retrieval results and Workspace Snapshot are already available in your working context. Discovery tool execution has been deprioritized as no new files were discovered. Use the retrieved context or inspect target files directly.`
+              content: `Retrieval results and Workspace Snapshot are already available in your working context. Discovery tool execution has been deprioritized as no new files were discovered. Use the retrieved context or inspect target files directly.`,
             };
           }
         }
 
-        if (tc.tool === "search_symbols" && tc.args && typeof tc.args.query === "string") {
+        if (
+          tc.tool === "search_symbols" &&
+          tc.args &&
+          typeof tc.args.query === "string"
+        ) {
           const query = tc.args.query.toLowerCase();
           const hasRetrieval = workingContext.relevantSymbols.length > 0;
-          const isSameQuery = lastDiscoveryParams.get("search_symbols") === query;
-          const noNewSymbols = agentState.discoveredSymbols.length <= (lastDiscoveredSymbolsCount || 0);
+          const isSameQuery =
+            lastDiscoveryParams.get("search_symbols") === query;
+          const noNewSymbols =
+            agentState.discoveredSymbols.length <=
+            (lastDiscoveredSymbolsCount || 0);
 
           lastDiscoveryParams.set("search_symbols", query);
 
           if (count > 3 && hasRetrieval && (isSameQuery || noNewSymbols)) {
-            agentOutputChannel.appendLine(`[Discovery Blocked] search_symbols count: ${count}`);
+            agentOutputChannel.appendLine(
+              `[Discovery Blocked] search_symbols count: ${count}`,
+            );
             return {
               tool: tc.tool,
               success: true,
-              content: `Retrieval results for symbols are already available in your working context. Discovery tool execution has been deprioritized as no new symbols were found. Use the retrieved context or inspect target files directly.`
+              content: `Retrieval results for symbols are already available in your working context. Discovery tool execution has been deprioritized as no new symbols were found. Use the retrieved context or inspect target files directly.`,
             };
           }
         }
       }
 
       // Check Discovery Budget (list_workspace_files, search_symbols)
-      const isDiscovery = (tc.tool === "list_workspace_files" || tc.tool === "search_symbols");
+      const isDiscovery =
+        tc.tool === "list_workspace_files" || tc.tool === "search_symbols";
       if (isDiscovery) {
         if (discoveryStepsCount >= 30) {
-          agentOutputChannel.appendLine(`[Discovery Budget Exceeded] Blocking execution of: ${tc.tool}`);
+          agentOutputChannel.appendLine(
+            `[Discovery Budget Exceeded] Blocking execution of: ${tc.tool}`,
+          );
           return {
             tool: tc.tool,
             success: true,
-            content: `You have exceeded the discovery budget.\n\nChoose one:\n1. Modify files\n2. Create files\n3. Finish\n\nDo not continue discovery.`
+            content: `You have exceeded the discovery budget.\n\nChoose one:\n1. Modify files\n2. Create files\n3. Finish\n\nDo not continue discovery.`,
           };
         }
         discoveryStepsCount++;
-        agentOutputChannel.appendLine(`[Discovery Budget] Count: ${discoveryStepsCount}`);
+        agentOutputChannel.appendLine(
+          `[Discovery Budget] Count: ${discoveryStepsCount}`,
+        );
       }
 
       // Check Repeated Discovery
       let isRepeated = false;
-      if (tc.tool === "read_file" && tc.args && typeof tc.args.path === "string") {
+      if (
+        tc.tool === "read_file" &&
+        tc.args &&
+        typeof tc.args.path === "string"
+      ) {
         const path = tc.args.path;
-        if (taskMemory.visitedFiles.includes(path) || requestedFilesInThisRun.has(path)) {
+        if (
+          taskMemory.visitedFiles.includes(path) ||
+          requestedFilesInThisRun.has(path)
+        ) {
           isRepeated = true;
         } else {
           requestedFilesInThisRun.add(path);
         }
-      } else if (tc.tool === "search_symbols" && tc.args && typeof tc.args.query === "string") {
+      } else if (
+        tc.tool === "search_symbols" &&
+        tc.args &&
+        typeof tc.args.query === "string"
+      ) {
         const query = tc.args.query;
-        if (taskMemory.visitedQueries.includes(query) || requestedQueriesInThisRun.has(query)) {
+        if (
+          taskMemory.visitedQueries.includes(query) ||
+          requestedQueriesInThisRun.has(query)
+        ) {
           isRepeated = true;
         } else {
           requestedQueriesInThisRun.add(query);
@@ -583,7 +707,9 @@ ${createdList || "None"}`;
       }
       if (isRepeated) {
         agentState.finishHints++;
-        agentOutputChannel.appendLine(`[Repeated Discovery Detected] finishHints = ${agentState.finishHints}`);
+        agentOutputChannel.appendLine(
+          `[Repeated Discovery Detected] finishHints = ${agentState.finishHints}`,
+        );
       }
 
       // Scoped Cache Hit & Sibling Suggestions & Repeated Reads Protection
@@ -591,62 +717,82 @@ ${createdList || "None"}`;
         if (tc.args && typeof tc.args.path === "string") {
           const path = tc.args.path;
           const normalizedPath = path.replace(/\\/g, "/");
-          const cachedContent = RepositoryCache.getInstance().getCachedFileContents().get(normalizedPath);
-          const currentContent = cachedContent !== undefined ? cachedContent : 
-                                 await RepositoryCache.getInstance().getFileContent(normalizedPath);
+          const cachedContent = RepositoryCache.getInstance()
+            .getCachedFileContents()
+            .get(normalizedPath);
+          const currentContent =
+            cachedContent !== undefined
+              ? cachedContent
+              : await RepositoryCache.getInstance().getFileContent(
+                  normalizedPath,
+                );
 
           // Proactively retrieve related files (siblings, child routes, nearby components)
-          const relatedInfo = await ContextRetrievalService.getRelatedFiles(normalizedPath);
+          const relatedInfo =
+            await ContextRetrievalService.getRelatedFiles(normalizedPath);
           const sameDirFiles = relatedInfo.siblingFiles;
           const childRoutes = relatedInfo.childRoutes;
           const nearbyComponents = relatedInfo.nearbyComponents;
-          
-          const relatedFilesText = `\n\nRELATED FILES:\n` +
-            `Same Directory Files:\n${sameDirFiles.map(f => `- ${f}`).join("\n") || "None"}\n` +
-            `Child Routes:\n${childRoutes.map(f => `- ${f}`).join("\n") || "None"}\n` +
-            `Nearby Components:\n${nearbyComponents.map(f => `- ${f}`).join("\n") || "None"}`;
+
+          const relatedFilesText =
+            `\n\nRELATED FILES:\n` +
+            `Same Directory Files:\n${sameDirFiles.map((f) => `- ${f}`).join("\n") || "None"}\n` +
+            `Child Routes:\n${childRoutes.map((f) => `- ${f}`).join("\n") || "None"}\n` +
+            `Nearby Components:\n${nearbyComponents.map((f) => `- ${f}`).join("\n") || "None"}`;
 
           // Track Repeated Reads (without modification)
           const readCount = (fileReadCounts.get(normalizedPath) || 0) + 1;
           fileReadCounts.set(normalizedPath, readCount);
 
           if (readCount > 3) {
-            agentOutputChannel.appendLine(`[Repeated Read Warning] ${normalizedPath} read count: ${readCount}`);
+            agentOutputChannel.appendLine(
+              `[Repeated Read Warning] ${normalizedPath} read count: ${readCount}`,
+            );
             return {
               tool: tc.tool,
               success: true,
-              content: `You have already reviewed this file. Do not read it again. Either modify it, inspect a related file, or finish.`
+              content: `You have already reviewed this file. Do not read it again. Either modify it, inspect a related file, or finish.`,
             };
           }
 
           // Duplicate Read Protection
-          if (lastReadContent.has(normalizedPath) && lastReadContent.get(normalizedPath) === currentContent) {
-            agentOutputChannel.appendLine(`[Duplicate Read Protection] File already reviewed: ${normalizedPath}`);
+          if (
+            lastReadContent.has(normalizedPath) &&
+            lastReadContent.get(normalizedPath) === currentContent
+          ) {
+            agentOutputChannel.appendLine(
+              `[Duplicate Read Protection] File already reviewed: ${normalizedPath}`,
+            );
             agentState.finishHints++;
             return {
               tool: tc.tool,
               success: true,
-              content: `${currentContent}\n\nThis file has not changed since your previous read.\n\nConsider whether additional edits are necessary.${relatedFilesText}`
+              content: `${currentContent}\n\nThis file has not changed since your previous read.\n\nConsider whether additional edits are necessary.${relatedFilesText}`,
             };
           }
 
           // Cache Hit for recently modified files
-          if (agentState.recentlyModifiedFiles.includes(normalizedPath) && cachedContent !== undefined) {
-            agentOutputChannel.appendLine(`[Cache Hit] Returning cached content for recently modified file: ${normalizedPath}`);
+          if (
+            agentState.recentlyModifiedFiles.includes(normalizedPath) &&
+            cachedContent !== undefined
+          ) {
+            agentOutputChannel.appendLine(
+              `[Cache Hit] Returning cached content for recently modified file: ${normalizedPath}`,
+            );
             lastReadContent.set(normalizedPath, currentContent);
             return {
               tool: tc.tool,
               success: true,
-              content: cachedContent + relatedFilesText
+              content: cachedContent + relatedFilesText,
             };
           }
-          
+
           lastReadContent.set(normalizedPath, currentContent);
 
           return {
             tool: tc.tool,
             success: true,
-            content: currentContent + relatedFilesText
+            content: currentContent + relatedFilesText,
           };
         }
       }
@@ -665,16 +811,29 @@ ${createdList || "None"}`;
 
         // Detect No-Op replacement
         let isNoOp = false;
-        if (tc.tool === "replace_in_file" && resultStr.includes("NO_CHANGES_REQUIRED")) {
+        if (
+          tc.tool === "replace_in_file" &&
+          resultStr.includes("NO_CHANGES_REQUIRED")
+        ) {
           isNoOp = true;
         }
 
-        if ((tc.tool === "write_file" || tc.tool === "create_file" || tc.tool === "replace_in_file") && !isNoOp) {
+        if (
+          (tc.tool === "write_file" ||
+            tc.tool === "create_file" ||
+            tc.tool === "replace_in_file") &&
+          !isNoOp
+        ) {
           filesModified = true;
           const file = (tc.args?.path || "").replace(/\\/g, "/");
           fileReadCounts.set(file, 0); // Reset read count on modification
           toolCallHistory.length = 0; // Reset alternating pattern history on modification
-          if (tc.tool === "replace_in_file" && tc.args && typeof tc.args.search === "string" && typeof tc.args.replace === "string") {
+          if (
+            tc.tool === "replace_in_file" &&
+            tc.args &&
+            typeof tc.args.search === "string" &&
+            typeof tc.args.replace === "string"
+          ) {
             editRecords.push({
               file,
               tool: tc.tool,
@@ -689,7 +848,10 @@ ${createdList || "None"}`;
           }
         }
 
-        return { tool: tc.tool, success: true, content: resultStr };
+        const successRes = { tool: tc.tool, success: true, content: resultStr };
+        const pastArgsKey = JSON.stringify({ tool: tc.tool, args: tc.args || {} });
+        pastExecutions.set(pastArgsKey, successRes);
+        return successRes;
       } catch (err: any) {
         return {
           tool: tc.tool,
@@ -717,12 +879,19 @@ ${createdList || "None"}`;
         try {
           const parsed = JSON.parse(res.content);
           if (Array.isArray(parsed)) {
-            agentState.discoveredFiles = Array.from(new Set([...agentState.discoveredFiles, ...parsed]));
+            agentState.discoveredFiles = Array.from(
+              new Set([...agentState.discoveredFiles, ...parsed]),
+            );
           }
         } catch {
           // ignore
         }
-      } else if (tc.tool === "read_file" || tc.tool === "write_file" || tc.tool === "create_file" || tc.tool === "replace_in_file") {
+      } else if (
+        tc.tool === "read_file" ||
+        tc.tool === "write_file" ||
+        tc.tool === "create_file" ||
+        tc.tool === "replace_in_file"
+      ) {
         if (tc.args && typeof tc.args.path === "string") {
           const path = tc.args.path.replace(/\\/g, "/");
           if (!agentState.openedFiles.includes(path)) {
@@ -743,7 +912,11 @@ ${createdList || "None"}`;
             }
           }
 
-          if (tc.tool === "write_file" || tc.tool === "create_file" || tc.tool === "replace_in_file") {
+          if (
+            tc.tool === "write_file" ||
+            tc.tool === "create_file" ||
+            tc.tool === "replace_in_file"
+          ) {
             const isNoOp = res.content.includes("NO_CHANGES_REQUIRED");
             if (!isNoOp) {
               stepModifiedFile = path;
@@ -778,8 +951,12 @@ ${createdList || "None"}`;
         try {
           const parsed = JSON.parse(res.content);
           if (Array.isArray(parsed)) {
-            const symbols = parsed.map((item: any) => item.symbol).filter(Boolean);
-            agentState.discoveredSymbols = Array.from(new Set([...agentState.discoveredSymbols, ...symbols]));
+            const symbols = parsed
+              .map((item: any) => item.symbol)
+              .filter(Boolean);
+            agentState.discoveredSymbols = Array.from(
+              new Set([...agentState.discoveredSymbols, ...symbols]),
+            );
 
             // Update TaskMemory relatedFiles
             for (const item of parsed) {
@@ -819,7 +996,9 @@ ${createdList || "None"}`;
         agentState.buildErrors = [];
         // build passes after successful modifications -> increment finishHints
         agentState.finishHints++;
-        agentOutputChannel.appendLine(`[Heuristic] Build passed after modifications. finishHints = ${agentState.finishHints}`);
+        agentOutputChannel.appendLine(
+          `[Heuristic] Build passed after modifications. finishHints = ${agentState.finishHints}`,
+        );
       }
     }
 
@@ -831,23 +1010,35 @@ ${createdList || "None"}`;
 
     // 1. Discovery Budget Warning (at 15)
     if (discoveryStepsCount >= 15 && discoveryStepsCount < 30) {
-      warnings.push(`\nYou have already reviewed sufficient repository context.\n\nProceed with implementation unless new information is required.`);
+      warnings.push(
+        `\nYou have already reviewed sufficient repository context.\n\nProceed with implementation unless new information is required.`,
+      );
     }
 
     // Alternating Pattern Warning (3 pairs of list_workspace_files and read_file)
     if (checkAlternatingPattern(toolCallHistory)) {
-      warnings.push(`\nYou appear to be stuck in discovery. Use existing context or inspect a related file.`);
+      warnings.push(
+        `\nYou appear to be stuck in discovery. Use existing context or inspect a related file.`,
+      );
     }
 
     // 2. Repeated Discovery Warning
     let stepHasRepeated = false;
     for (const tc of toolCalls) {
-      if (tc.tool === "read_file" && tc.args && typeof tc.args.path === "string") {
+      if (
+        tc.tool === "read_file" &&
+        tc.args &&
+        typeof tc.args.path === "string"
+      ) {
         const path = tc.args.path.replace(/\\/g, "/");
         if (taskMemory.visitedFiles.includes(path)) {
           stepHasRepeated = true;
         }
-      } else if (tc.tool === "search_symbols" && tc.args && typeof tc.args.query === "string") {
+      } else if (
+        tc.tool === "search_symbols" &&
+        tc.args &&
+        typeof tc.args.query === "string"
+      ) {
         const query = tc.args.query;
         if (taskMemory.visitedQueries.includes(query)) {
           stepHasRepeated = true;
@@ -855,28 +1046,38 @@ ${createdList || "None"}`;
       }
     }
     if (stepHasRepeated) {
-      warnings.push(`\nYou have already reviewed these files and searches.\n\nChoose one:\n\n1. Modify files\n2. Create files\n3. Finish\n\nDo not continue discovery.`);
+      warnings.push(
+        `\nYou have already reviewed these files and searches.\n\nChoose one:\n\n1. Modify files\n2. Create files\n3. Finish\n\nDo not continue discovery.`,
+      );
     }
 
     if (stepModifiedFiles && agentState.buildErrors.length === 0) {
       // 3. Loop pattern detection (at count >= 3)
       for (const path of agentState.modifiedFiles) {
-        const fileEdits = editRecords.filter(r => r.file === path);
+        const fileEdits = editRecords.filter((r) => r.file === path);
         if (fileEdits.length >= 3 && detectLoopPattern(fileEdits)) {
           agentState.finishHints++;
-          warnings.push(`\nThe file has already been modified multiple times.\n\nIf the request is satisfied, call finish.`);
-          agentOutputChannel.appendLine(`[Loop Detection] Loop pattern detected on ${path}. finishHints = ${agentState.finishHints}`);
+          warnings.push(
+            `\nThe file has already been modified multiple times.\n\nIf the request is satisfied, call finish.`,
+          );
+          agentOutputChannel.appendLine(
+            `[Loop Detection] Loop pattern detected on ${path}. finishHints = ${agentState.finishHints}`,
+          );
           break; // show warning once
         }
       }
 
       // 4. Per-file modification budget (at count >= 5)
       for (const path of agentState.modifiedFiles) {
-        const fileEdits = editRecords.filter(r => r.file === path);
+        const fileEdits = editRecords.filter((r) => r.file === path);
         if (fileEdits.length >= 5) {
           agentState.finishHints++;
-          warnings.push(`\nThis file has already been modified multiple times.\n\nIf the request has been completed,\ncall finish.\n\nIf additional changes are required,\nexplain why.`);
-          agentOutputChannel.appendLine(`[Budget Warning] Per-file budget met/exceeded on ${path} (${fileEdits.length} edits). finishHints = ${agentState.finishHints}`);
+          warnings.push(
+            `\nThis file has already been modified multiple times.\n\nIf the request has been completed,\ncall finish.\n\nIf additional changes are required,\nexplain why.`,
+          );
+          agentOutputChannel.appendLine(
+            `[Budget Warning] Per-file budget met/exceeded on ${path} (${fileEdits.length} edits). finishHints = ${agentState.finishHints}`,
+          );
           break; // show warning once
         }
       }
@@ -884,8 +1085,12 @@ ${createdList || "None"}`;
       // 5. Global modification budget (at total edits >= 15)
       if (editRecords.length >= 15) {
         agentState.finishHints++;
-        warnings.push(`\nThe maximum total modification budget of 15 has been reached.\n\nIf the request has been completed,\ncall finish.\n\nIf additional changes are required,\nexplain why.`);
-        agentOutputChannel.appendLine(`[Budget Warning] Global budget met/exceeded (${editRecords.length} edits). finishHints = ${agentState.finishHints}`);
+        warnings.push(
+          `\nThe maximum total modification budget of 15 has been reached.\n\nIf the request has been completed,\ncall finish.\n\nIf additional changes are required,\nexplain why.`,
+        );
+        agentOutputChannel.appendLine(
+          `[Budget Warning] Global budget met/exceeded (${editRecords.length} edits). finishHints = ${agentState.finishHints}`,
+        );
       }
     }
 
@@ -895,12 +1100,16 @@ ${createdList || "None"}`;
       agentState.modifiedFiles.length > 0 &&
       agentState.completedObjectives.length > 0
     ) {
-      warnings.push(`\nThe request may be completed.\n\nIf all requested objectives have been addressed,\ncall finish.`);
+      warnings.push(
+        `\nThe request may be completed.\n\nIf all requested objectives have been addressed,\ncall finish.`,
+      );
     }
 
     // 7. Multiple signals / finishHints warning
     if (agentState.finishHints >= 3) {
-      warnings.push(`\nMultiple signals indicate the task may already be complete.\n\nPrefer calling finish unless additional changes are strictly required.`);
+      warnings.push(
+        `\nMultiple signals indicate the task may already be complete.\n\nPrefer calling finish unless additional changes are strictly required.`,
+      );
     }
 
     if (warnings.length > 0) {
@@ -953,18 +1162,18 @@ Build: ${profile.buildCommand || "None"}
 
 Top Level:
 ${Array.from(topLevelDirs)
-      .slice(0, 10)
-      .map((d) => `  ${d}`)
-      .join("\n")}
+  .slice(0, 10)
+  .map((d) => `  ${d}`)
+  .join("\n")}
 
 Important Files:
 ${importantFiles
-      .slice(0, 15)
-      .map((f) => `  ${f}`)
-      .join("\n")}`;
+  .slice(0, 15)
+  .map((f) => `  ${f}`)
+  .join("\n")}`;
 }
 
-function extractToolCalls(response: string): ToolCall[] | ToolCall | null {
+function extractToolCalls(response: string): ToolCall[] | null {
   const jsonBlockRegex = /```(?:json)?\n([\s\S]*?)```/i;
   const match = response.match(jsonBlockRegex);
   const textToParse = match ? match[1].trim() : response.trim();
@@ -997,7 +1206,7 @@ function extractToolCalls(response: string): ToolCall[] | ToolCall | null {
         typeof parsed === "object" &&
         typeof parsed.tool === "string"
       ) {
-        return parsed as ToolCall;
+        return [parsed as ToolCall];
       }
     } catch {
       // ignore
@@ -1016,7 +1225,7 @@ function extractToolCalls(response: string): ToolCall[] | ToolCall | null {
       typeof parsed === "object" &&
       typeof parsed.tool === "string"
     ) {
-      return parsed as ToolCall;
+      return [parsed as ToolCall];
     }
   } catch {
     // ignore
@@ -1029,7 +1238,15 @@ async function streamOllamaResponse(
   messages: Message[],
   onToken: (token: string) => void,
   token?: vscode.CancellationToken,
+  model: string = "gemma4:31b-cloud",
 ) {
+  // If model name starts with "hf:" or contains a "/" (e.g. Hugging Face repo ID)
+  if (model.startsWith("hf:") || model.includes("/")) {
+    const cleanModel = model.replace(/^hf:/, "");
+    await streamHuggingFaceResponse(messages, onToken, token, cleanModel);
+    return;
+  }
+
   const abortController = new AbortController();
   let disposable: vscode.Disposable | undefined;
   if (token) {
@@ -1044,7 +1261,7 @@ async function streamOllamaResponse(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "qwen3-coder:480b-cloud",
+        model,
         messages,
         stream: true,
         options: {
@@ -1097,6 +1314,170 @@ async function streamOllamaResponse(
         }
       } catch {
         // incomplete chunk — skip
+      }
+    }
+  }
+}
+
+async function streamHuggingFaceResponse(
+  messages: Message[],
+  onToken: (token: string) => void,
+  token?: vscode.CancellationToken,
+  model: string = "Qwen/Qwen2.5-Coder-32B-Instruct",
+) {
+  // Try to retrieve Hugging Face token from VS Code configurations
+  const config = vscode.workspace.getConfiguration("gbsAgent");
+  let hfToken =
+    config.get<string>("huggingfaceToken") || process.env.HF_TOKEN || "";
+
+  if (!hfToken) {
+    // Prompt the user for HF token if missing
+    const inputToken = await vscode.window.showInputBox({
+      prompt:
+        "Please enter your Hugging Face Access Token to use Hugging Face Cloud (Serverless Inference API)",
+      password: true,
+      placeHolder: "hf_...",
+    });
+    if (inputToken) {
+      hfToken = inputToken;
+      // Optionally persist it in config
+      await config.update(
+        "huggingfaceToken",
+        hfToken,
+        vscode.ConfigurationTarget.Global,
+      );
+    } else {
+      throw new Error(
+        "Hugging Face Access Token is required to use cloud models. Configure it or select a local Ollama model.",
+      );
+    }
+  }
+
+  const abortController = new AbortController();
+  let disposable: vscode.Disposable | undefined;
+  if (token) {
+    disposable = token.onCancellationRequested(() => {
+      abortController.abort();
+    });
+  }
+
+  let response: Response | undefined = undefined;
+  let useAlternativeEndpoint = false;
+
+  try {
+    // Try Hugging Face unified router API endpoint (as shown in your screenshot)
+    response = await fetch(
+      "https://router.huggingface.co/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${hfToken}`,
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: messages,
+          stream: true,
+          temperature: 0.1,
+          max_tokens: 4096,
+        }),
+        signal: abortController.signal,
+      },
+    );
+  } catch (err: any) {
+    if (err.name === "AbortError" || token?.isCancellationRequested) {
+      throw new Error("Request cancelled by user.");
+    }
+    useAlternativeEndpoint = true;
+  }
+
+  // Fallback to traditional serverless inference endpoint if router is blocked
+  if (useAlternativeEndpoint) {
+    try {
+      const res = await fetch(
+        `https://api-inference.huggingface.co/models/${model}/v1/chat/completions`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${hfToken}`,
+          },
+          body: JSON.stringify({
+            model: model,
+            messages: messages,
+            stream: true,
+            temperature: 0.1,
+            max_tokens: 4096,
+          }),
+          signal: abortController.signal,
+        },
+      );
+      response = res;
+    } catch (err: any) {
+      if (err.name === "AbortError" || token?.isCancellationRequested) {
+        throw new Error("Request cancelled by user.");
+      }
+      throw new Error(
+        `Failed to contact Hugging Face server (both router and standard endpoints failed): ${err.message || err}`,
+      );
+    } finally {
+      if (disposable) {
+        disposable.dispose();
+      }
+    }
+  }
+
+  if (!response || !response.ok) {
+    const errText = response
+      ? await response.text().catch(() => "Unknown error")
+      : "No response";
+    throw new Error(
+      `Hugging Face Serverless Inference returned an error: ${errText}`,
+    );
+  }
+
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    if (token?.isCancellationRequested) {
+      reader.cancel();
+      break;
+    }
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    // Save the last incomplete line back to the buffer
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      const cleanLine = line.trim();
+      if (!cleanLine || !cleanLine.startsWith("data:")) {
+        continue;
+      }
+
+      const dataStr = cleanLine.substring(5).trim();
+      if (dataStr === "[DONE]") {
+        break;
+      }
+
+      try {
+        const json = JSON.parse(dataStr);
+        const choice = json.choices?.[0];
+        if (
+          choice &&
+          choice.delta &&
+          typeof choice.delta.content === "string"
+        ) {
+          onToken(choice.delta.content);
+        }
+      } catch {
+        // Skip malformed streaming chunks
       }
     }
   }

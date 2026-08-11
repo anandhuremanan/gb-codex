@@ -24,7 +24,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         session.chatHistory.push({ role: "user", content: message.text });
 
         const cancellationSource = new vscode.CancellationTokenSource();
-        const promise = handleUserMessage(message.text, webviewView.webview, cancellationSource.token);
+        const promise = handleUserMessage(message.text, message.model || "deepseek-v4-flash:cloud", webviewView.webview, cancellationSource.token);
         session.currentExecution = { cancellationSource, promise };
 
         await promise;
@@ -49,6 +49,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
 async function handleUserMessage(
   userMessage: string,
+  model: string,
   webview: vscode.Webview,
   cancellationToken: vscode.CancellationToken
 ) {
@@ -64,7 +65,8 @@ async function handleUserMessage(
           // Raw Ollama JSON tokens are processed internally, not streamed to chat bubbles
         }
       },
-      cancellationToken
+      cancellationToken,
+      model
     );
 
     // Save final assistant message in chatHistory
@@ -193,15 +195,19 @@ function getChatHtml(): string {
   }
   .thinking span:nth-child(2) { animation-delay: 0.2s; }
   .thinking span:nth-child(3) { animation-delay: 0.4s; }
-  @keyframes blink { 0%,80%,100% { opacity: 0.2; } 40% { opacity: 1; } }
-
   /* ── Input bar ── */
   #input-bar {
     display: flex;
-    gap: 6px;
+    flex-direction: column;
+    gap: 8px;
     padding: 8px;
     border-top: 1px solid var(--vscode-panel-border);
     background: var(--vscode-sideBar-background);
+  }
+
+  .input-row {
+    display: flex;
+    gap: 6px;
   }
 
   #user-input {
@@ -232,6 +238,75 @@ function getChatHtml(): string {
   }
   #send-btn:hover { background: var(--vscode-button-hoverBackground); }
   #send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* Model selection panel */
+  /* Model selection panel */
+  .model-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.85em;
+    opacity: 0.9;
+  }
+
+  .provider-model-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .model-row label {
+    white-space: nowrap;
+    color: var(--vscode-descriptionForeground);
+  }
+
+  #provider-select {
+    padding: 4px 6px;
+    border-radius: 3px;
+    border: 1px solid var(--vscode-input-border);
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    font-family: inherit;
+    font-size: inherit;
+  }
+  #provider-select:focus { outline: 1px solid var(--vscode-focusBorder); }
+
+  #model-input {
+    flex: 1;
+    padding: 4px 6px;
+    border-radius: 3px;
+    border: 1px solid var(--vscode-input-border);
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    font-family: inherit;
+    font-size: inherit;
+  }
+  #model-input:focus { outline: 1px solid var(--vscode-focusBorder); }
+
+  /* Welcome Card */
+  .welcome-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    border-radius: 8px;
+    background: var(--vscode-editor-inactiveSelectionBackground);
+    border: 1px solid var(--vscode-panel-border);
+    margin: 12px 10px;
+    color: var(--vscode-foreground);
+  }
+
+  .welcome-card h3 {
+    margin: 0;
+    font-size: 1.1em;
+    color: var(--vscode-textLink-foreground);
+  }
+
+  .welcome-card p {
+    font-size: 0.9em;
+    line-height: 1.4;
+    opacity: 0.9;
+  }
 </style>
 </head>
 <body>
@@ -239,9 +314,20 @@ function getChatHtml(): string {
 <div id="messages"></div>
 
 <div id="input-bar">
-  <textarea id="user-input" rows="1" placeholder="Ask about your code…"></textarea>
-  <button id="send-btn">Send</button>
-  <button id="stop-btn" style="display: none; align-self: flex-end; padding: 7px 13px; border: none; border-radius: 5px; background: var(--vscode-errorForeground, #c73737); color: white; cursor: pointer; font-size: inherit;">Stop</button>
+  <div class="model-row">
+    <div class="provider-model-row">
+      <select id="provider-select">
+        <option value="ollama">Ollama</option>
+        <option value="hf">Hugging Face</option>
+      </select>
+      <input type="text" id="model-input" value="deepseek-v4-flash:cloud" placeholder="Model ID/Name" />
+    </div>
+  </div>
+  <div class="input-row">
+    <textarea id="user-input" rows="1" placeholder="Ask about your code…"></textarea>
+    <button id="send-btn">Send</button>
+    <button id="stop-btn" style="display: none; align-self: flex-end; padding: 7px 13px; border: none; border-radius: 5px; background: var(--vscode-errorForeground, #c73737); color: white; cursor: pointer; font-size: inherit;">Stop</button>
+  </div>
 </div>
 
 <script>
@@ -250,18 +336,58 @@ function getChatHtml(): string {
   const input    = document.getElementById('user-input');
   const sendBtn  = document.getElementById('send-btn');
   const stopBtn  = document.getElementById('stop-btn');
+  const providerSelect = document.getElementById('provider-select');
+  const modelInput = document.getElementById('model-input');
 
   let assistantBubble = null;
   let thinkingEl      = null;
   let currentNotifyEl = null;
 
   // Restore state from VS Code state store
-  const previousState = vscode.getState() || { chatHistory: [], isExecuting: false };
+  const previousState = vscode.getState() || { chatHistory: [], isExecuting: false, selectedModel: "deepseek-v4-flash:cloud", provider: "ollama" };
   let chatHistory = previousState.chatHistory || [];
-
-  for (const m of chatHistory) {
-    appendBubbleDirect(m.cls, m.text);
+  
+  if (previousState.selectedModel) {
+    modelInput.value = previousState.selectedModel;
   }
+  if (previousState.provider) {
+    providerSelect.value = previousState.provider;
+  }
+
+  // Handle provider changes to update placeholders
+  providerSelect.addEventListener('change', function() {
+    if (providerSelect.value === 'hf') {
+      modelInput.placeholder = 'e.g. Qwen/Qwen2.5-Coder-32B-Instruct';
+      if (modelInput.value === 'deepseek-v4-flash:cloud' || modelInput.value === 'gemma4:31b-cloud') {
+        modelInput.value = 'Qwen/Qwen2.5-Coder-32B-Instruct';
+      }
+    } else {
+      modelInput.placeholder = 'e.g. deepseek-v4-flash:cloud';
+      if (modelInput.value === 'Qwen/Qwen2.5-Coder-32B-Instruct') {
+        modelInput.value = 'deepseek-v4-flash:cloud';
+      }
+    }
+    saveState();
+  });
+
+  function renderMessages() {
+    messages.innerHTML = '';
+    if (chatHistory.length === 0) {
+      const welcome = document.createElement('div');
+      welcome.className = 'welcome-card';
+      welcome.innerHTML = 
+        '<h3>Welcome to GBS Local Dev Agent! \\u{1F680}</h3>' +
+        '<p>I am a tool-driven autonomous coding assistant. I can inspect your project structure, search the workspace, read/write files, and run commands to validate code changes automatically.</p>' +
+        '<p>Type a prompt in the box below to get started, and select your preferred model provider (Ollama or Hugging Face Cloud) from the dropdown.</p>';
+      messages.appendChild(welcome);
+    } else {
+      for (const m of chatHistory) {
+        appendBubbleDirect(m.cls, m.text);
+      }
+    }
+  }
+
+  renderMessages();
 
   if (previousState.isExecuting) {
     sendBtn.disabled = true;
@@ -277,9 +403,13 @@ function getChatHtml(): string {
   function saveState() {
     vscode.setState({
       chatHistory: chatHistory,
-      isExecuting: sendBtn.disabled
+      isExecuting: sendBtn.disabled,
+      selectedModel: modelInput.value,
+      provider: providerSelect.value
     });
   }
+
+  modelInput.addEventListener('input', saveState);
 
   input.addEventListener('input', function() {
     input.style.height = 'auto';
@@ -300,6 +430,10 @@ function getChatHtml(): string {
     var text = input.value.trim();
     if (!text || sendBtn.disabled) return;
 
+    // Remove welcome card if present before adding bubbles
+    const welcomeCard = messages.querySelector('.welcome-card');
+    if (welcomeCard) welcomeCard.remove();
+
     appendBubble('user', text);
     input.value = '';
     input.style.height = 'auto';
@@ -311,20 +445,27 @@ function getChatHtml(): string {
     thinkingEl.innerHTML = '<span></span><span></span><span></span>';
     currentNotifyEl = null;
 
-    vscode.postMessage({ type: 'userMessage', text: text });
+    const selectedProvider = providerSelect.value;
+    const rawModel = modelInput.value.trim();
+    const finalModel = selectedProvider === 'hf' ? 'hf:' + rawModel : rawModel;
+
+    vscode.postMessage({ 
+      type: 'userMessage', 
+      text: text,
+      model: finalModel
+    });
   }
 
   window.addEventListener('message', function(event) {
     var data = event.data;
 
     if (data.type === 'restoreState') {
-      messages.innerHTML = '';
       chatHistory = [];
       for (const m of data.chatHistory) {
         const bubbleCls = m.role === 'user' ? 'user' : 'assistant';
-        appendBubbleDirect(bubbleCls, m.content);
         chatHistory.push({ cls: bubbleCls, text: m.content });
       }
+      renderMessages();
       if (data.isExecuting) {
         sendBtn.disabled = true;
         sendBtn.style.display = 'none';
@@ -347,6 +488,9 @@ function getChatHtml(): string {
     }
 
     if (data.type === 'notify') {
+      const welcomeCard = messages.querySelector('.welcome-card');
+      if (welcomeCard) welcomeCard.remove();
+
       if (!currentNotifyEl) {
         currentNotifyEl = appendBubble('notify', data.text);
       } else {
@@ -361,6 +505,9 @@ function getChatHtml(): string {
     }
 
     if (data.type === 'token') {
+      const welcomeCard = messages.querySelector('.welcome-card');
+      if (welcomeCard) welcomeCard.remove();
+
       if (thinkingEl) {
         thinkingEl.className = 'msg assistant';
         thinkingEl.textContent = '';
