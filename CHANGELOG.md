@@ -4,6 +4,11 @@ All notable changes to the "gbs-local-dev" extension will be documented in this 
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.0.8] - 2026-09-17
+
+### Fixed
+- The task checklist could stay unchecked after the work was done: the agent is now reminded once to update it before finishing, a leftover list is shown as "not finished", and a completed list is cleared when the next request starts.
+
 ## [0.0.7] - 2026-09-17
 
 ### Changed

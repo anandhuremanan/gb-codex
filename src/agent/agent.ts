@@ -4,7 +4,7 @@ import { LlmMessage, LlmProvider, ToolCall, ToolSpec, Usage, newId } from "../ll
 import { compactIfNeeded } from "./compaction";
 import { collectDiagnostics } from "./diagnostics";
 import { PermissionPolicy } from "./permissions";
-import { ToolItem, TranscriptItem } from "./transcript";
+import { Todo, ToolItem, TranscriptItem } from "./transcript";
 import { Tool, ToolContext, ToolHost, ToolState } from "./tools/types";
 import { truncateMiddle } from "./workspace";
 
@@ -23,6 +23,8 @@ export interface AgentHost extends ToolHost {
   /** Messages the user sent while the agent was running (main agent only). */
   drainQueuedMessages(): string[];
   hasQueuedMessages(): boolean;
+  /** The session checklist, so the loop can catch a final answer that leaves it stale. */
+  getTodos(): Todo[];
   log(message: string): void;
 }
 
@@ -67,6 +69,7 @@ export class Agent {
     const { host, messages, signal, provider } = this.options;
     let continuations = 0;
     let lastText = "";
+    let remindedAboutTodos = false;
 
     for (let step = 1; step <= this.options.maxSteps; step++) {
       throwIfAborted(signal);
@@ -141,6 +144,18 @@ export class Agent {
         }
         if (this.isMain && host.hasQueuedMessages()) {
           // The user sent more input while the model was answering; handle it in the same run.
+          continue;
+        }
+        const openTodos = this.isMain ? host.getTodos().filter((t) => t.status !== "completed") : [];
+        if (openTodos.length && !remindedAboutTodos) {
+          // Models often forget the final todo_write; one short reminder keeps the checklist truthful.
+          remindedAboutTodos = true;
+          messages.push({
+            role: "user",
+            content: `<system-reminder>Your task list still has ${openTodos.length} unfinished item(s): ${openTodos
+              .map((t) => `"${t.content}"`)
+              .join(", ")}. If they are done, call todo_write to mark them completed. If work remains, continue it. If an item was dropped, update the list and briefly say why. Do not repeat your previous summary.</system-reminder>`,
+          });
           continue;
         }
         return result.text.trim() ? result.text : lastText;

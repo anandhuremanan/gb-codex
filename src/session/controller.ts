@@ -338,6 +338,9 @@ export class SessionController implements AgentHost, vscode.Disposable {
     const abort = new AbortController();
     this.abort = abort;
     this.turn = { startedAt: Date.now(), inputTokens: 0, outputTokens: 0, files: new Map() };
+    if (session.todos.length && session.todos.every((t) => t.status === "completed")) {
+      this.setTodos([]); // a finished checklist belongs to the previous request
+    }
     this.activity = "Starting…";
     this.post({ type: "running", running: true, turnStartedAt: this.turn.startedAt, activity: this.activity });
 
@@ -660,6 +663,10 @@ export class SessionController implements AgentHost, vscode.Disposable {
 
   hasQueuedMessages(): boolean {
     return this.queued.length > 0;
+  }
+
+  getTodos(): Todo[] {
+    return this.session.todos;
   }
 
   setTodos(todos: Todo[]): void {

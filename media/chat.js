@@ -625,12 +625,15 @@
     }
     const done = todos.filter((t) => t.status === "completed").length;
     const current = todos.find((t) => t.status === "in_progress");
-    const collapsed = state.todosCollapsed ?? (done === todos.length && !state.running);
+    const allDone = done === todos.length;
+    const stale = !state.running && !allDone;
+    const collapsed = state.todosCollapsed ?? (allDone && !state.running);
     els.todos.innerHTML = `
-      <div class="todos${collapsed ? " collapsed" : ""}">
+      <div class="todos${collapsed ? " collapsed" : ""}${stale ? " stale" : ""}">
         <div class="todos-head" data-todos-toggle>
           <span class="chev">${icon("chevronRight")}</span>
-          <span>${collapsed && current ? esc(current.content) : "Tasks"}</span>
+          <span>${collapsed && current && !stale ? esc(current.content) : "Tasks"}</span>
+          ${stale ? '<span class="badge" title="The agent stopped before finishing these items">not finished</span>' : ""}
           <span class="progress"><i></i></span>
           <span class="count">${done}/${todos.length}</span>
         </div>
