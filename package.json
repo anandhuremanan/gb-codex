@@ -1,7 +1,7 @@
 {
   "name": "gbs-software-agent",
   "displayName": "GBS SE Agent",
-  "description": "a local software agent",
+  "description": "An autonomous coding agent for VS Code powered by local (Ollama) or OpenAI-compatible models.",
   "publisher": "gbs-internal-toolchain",
   "icon": "assets/icon.png",
   "license": "MIT",
@@ -13,11 +13,13 @@
     "type": "git",
     "url": "https://github.com/anandhuremanan/gb-codex"
   },
-  "version": "0.0.6",
+  "version": "0.0.7",
   "engines": {
     "vscode": "^1.120.0"
   },
   "categories": [
+    "AI",
+    "Programming Languages",
     "Other"
   ],
   "activationEvents": [],
@@ -25,23 +27,48 @@
   "contributes": {
     "commands": [
       {
-        "command": "gbs-local-dev.helloWorld",
-        "title": "Hello World"
+        "command": "gbsAgent.newChat",
+        "title": "New Chat",
+        "category": "GBS Agent",
+        "icon": "$(add)"
       },
       {
-        "command": "gbs-local-dev.readFile",
-        "title": "GBS: Read File"
+        "command": "gbsAgent.stop",
+        "title": "Stop Agent",
+        "category": "GBS Agent",
+        "icon": "$(debug-stop)"
       },
       {
-        "command": "gbs-local-dev.writeFile",
-        "title": "GBS: Write File"
+        "command": "gbsAgent.setApiKey",
+        "title": "Set API Key",
+        "category": "GBS Agent"
+      },
+      {
+        "command": "gbsAgent.showLogs",
+        "title": "Show Logs",
+        "category": "GBS Agent",
+        "icon": "$(output)"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "gbsAgent.newChat",
+          "when": "view == gbs-local-dev.chatView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "gbsAgent.showLogs",
+          "when": "view == gbs-local-dev.chatView",
+          "group": "navigation@2"
+        }
+      ]
+    },
     "viewsContainers": {
       "activitybar": [
         {
           "id": "gbs-dev-panel",
-          "title": "GBS Dev",
+          "title": "GBS Agent",
           "icon": "$(robot)"
         }
       ]
@@ -59,10 +86,111 @@
     "configuration": {
       "title": "GBS Agent",
       "properties": {
+        "gbsAgent.provider": {
+          "type": "string",
+          "enum": [
+            "ollama",
+            "openai"
+          ],
+          "enumDescriptions": [
+            "Ollama (local or Ollama cloud models)",
+            "Any OpenAI-compatible /chat/completions endpoint (Hugging Face router, vLLM, LM Studio, OpenRouter, ...)"
+          ],
+          "default": "ollama",
+          "description": "Model provider.",
+          "order": 1
+        },
+        "gbsAgent.model": {
+          "type": "string",
+          "default": "deepseek-v4-flash:cloud",
+          "description": "Model used by the main agent.",
+          "order": 2
+        },
+        "gbsAgent.subagentModel": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Optional cheaper/faster model for subagents (codebase exploration). Leave empty to use `#gbsAgent.model#`. A small model here saves a lot of usage.",
+          "order": 3
+        },
+        "gbsAgent.permissionMode": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "acceptEdits",
+            "auto"
+          ],
+          "enumDescriptions": [
+            "Ask before every file edit and shell command",
+            "Apply file edits automatically; ask before shell commands",
+            "Never ask (use with care)"
+          ],
+          "default": "acceptEdits",
+          "description": "When the agent must ask for approval.",
+          "order": 4
+        },
+        "gbsAgent.ollama.baseUrl": {
+          "type": "string",
+          "default": "http://localhost:11434",
+          "description": "Ollama server URL."
+        },
+        "gbsAgent.openai.baseUrl": {
+          "type": "string",
+          "default": "https://router.huggingface.co/v1",
+          "description": "Base URL of the OpenAI-compatible API (without /chat/completions)."
+        },
+        "gbsAgent.openai.apiKey": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "API key for the OpenAI-compatible endpoint. Prefer the **GBS Agent: Set API Key** command, which stores it in secret storage."
+        },
         "gbsAgent.huggingfaceToken": {
           "type": "string",
           "default": "",
-          "description": "Your Hugging Face API access token (Read type) for using serverless cloud inference."
+          "deprecationMessage": "Use the 'GBS Agent: Set API Key' command instead.",
+          "description": "Legacy: Hugging Face token (used as the API key when no other key is set)."
+        },
+        "gbsAgent.contextWindow": {
+          "type": "number",
+          "default": 32768,
+          "minimum": 4096,
+          "description": "Model context window in tokens. Sent to Ollama as num_ctx and used to decide when to compact the conversation."
+        },
+        "gbsAgent.maxOutputTokens": {
+          "type": "number",
+          "default": 8192,
+          "minimum": 512,
+          "description": "Maximum tokens per model response."
+        },
+        "gbsAgent.temperature": {
+          "type": "number",
+          "default": 0.2,
+          "minimum": 0,
+          "maximum": 2,
+          "description": "Sampling temperature."
+        },
+        "gbsAgent.maxSteps": {
+          "type": "number",
+          "default": 60,
+          "minimum": 1,
+          "description": "Maximum model calls per request before the agent pauses."
+        },
+        "gbsAgent.commandTimeoutSeconds": {
+          "type": "number",
+          "default": 120,
+          "minimum": 5,
+          "maximum": 600,
+          "description": "Default timeout for shell commands."
+        },
+        "gbsAgent.maxToolOutputChars": {
+          "type": "number",
+          "default": 20000,
+          "minimum": 2000,
+          "description": "Tool results longer than this are truncated before being sent to the model."
+        },
+        "gbsAgent.shell": {
+          "type": "string",
+          "default": "",
+          "description": "Shell used for commands (empty = cmd.exe on Windows, $SHELL elsewhere). Example: C:\\Program Files\\Git\\bin\\bash.exe"
         }
       }
     }

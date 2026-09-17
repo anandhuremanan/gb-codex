@@ -1,115 +1,93 @@
-# GBS Local Dev: Agent Architecture
+# GBS Agent — Architecture
 
-This document explains the architecture of the **GBS Local Dev** software agent extension, detailing how each component works, the role of each file, and the overall execution flow.
+GBS Agent is a VS Code extension that runs an autonomous coding agent against a local (Ollama) or OpenAI-compatible model. It follows the same design as Claude Code: a single tool-calling loop over an append-only conversation, a small set of precise tools, subagents for context-heavy research, and a UI that shows every step.
 
----
-
-## 1. High-Level Flow Diagram
-
-The following diagram illustrates the execution cycle of the agent loop when a user submits a request.
+## Request flow
 
 ```mermaid
 graph TD
-    A[VS Code Chat Webview] -->|1. Request sent| B(runAgent in agentLoop.ts)
-    B -->|2. Initialize cache| C[RepositoryCache]
-    B -->|3. Get current session| D[AgentSessionManager]
-    B -->|4. Build prompt| E[ContextManager]
-    E -->|5. Truncate & Budget| F[PromptBudgetManager]
-    B -->|6. Call LLM| G[Ollama Streaming API]
-    G -->|7. Tool calls returned| H{Tool Execution Loop}
-    H -->|No tools / final_answer| I[Validate & Return Output]
-    H -->|Tools executed| J[Update AgentState & TaskMemory]
-    J -->|Run light check| K[validateBuild / ValidationStrategy]
-    K -->|8. Run Termination Heuristics| L{Termination & Discovery Budgets}
-    L -->|Append warnings & hints| E
-    E --> B
+    UI[Chat webview<br/>media/chat.js] -- send / stop / approve --> C[SessionController<br/>src/session/controller.ts]
+    C -- patch / todos / running --> UI
+    C --> A[Agent loop<br/>src/agent/agent.ts]
+    A -- compactIfNeeded --> K[compaction.ts]
+    A -- chat stream --> P[AdaptiveProvider]
+    P --> O[OllamaProvider /api/chat]
+    P --> OA[OpenAICompatibleProvider /chat/completions]
+    A -- tool calls --> T[Tools]
+    T -- task --> S[Subagent = new Agent<br/>explore / general]
+    S --> P
+    A -- after edits --> D[VS Code diagnostics]
 ```
 
----
+Each user message starts a **turn**. The agent calls the model with the system prompt, the tool schemas, and the conversation. It executes any tool calls, appends the results, and repeats until the model answers without tools (or `gbsAgent.maxSteps` is reached).
 
-## 2. Core Components and File Map
+## Source map
 
-### Extension & Webview Setup
-* **[src/extension.ts](file:///d:/inittest_vsext/gbs-local-dev/src/extension.ts)**
-  * **Role:** Entry point for the VS Code extension commands and views.
-* **[src/chatView.ts](file:///d:/inittest_vsext/gbs-local-dev/src/chatView.ts)**
-  * **Role:** UI-only sidebar provider that handles chat layouts and streams messages.
-  * **Key Features:** Uses `vscode.getState()` and `vscode.setState()` to save and restore chat layouts, inputs, and thinking states across tab switches.
+| Path | Responsibility |
+|---|---|
+| `src/extension.ts` | Activation: output channel, controller, webview provider, diff content provider, commands. |
+| `src/config.ts` | Typed settings, config updates, API-key lookup (SecretStorage → settings → env). |
+| `src/llm/types.ts` | Provider-neutral `LlmMessage`, `ToolCall`, `ToolSpec`, `ChatResult`. |
+| `src/llm/http.ts` | `postJson` with clear connection errors, `readLines` (buffers partial lines across chunks), cancellation. |
+| `src/llm/ollama.ts` | Native Ollama chat with tools, thinking, usage (`prompt_eval_count`/`eval_count`), `num_ctx`. |
+| `src/llm/openai.ts` | OpenAI-compatible SSE streaming; assembles tool-call argument fragments; usage via `stream_options`. |
+| `src/llm/adaptiveProvider.ts` | Uses native tool calling; on "model does not support tools" switches that model to a text protocol. Also recovers `<tool_call>` text from models that emit it inline. |
+| `src/llm/textToolCalls.ts` | Text tool protocol: prompt, history conversion, parsing, and a stream filter that hides tool markup from the UI. |
+| `src/agent/agent.ts` | The loop. Parallel execution of concurrency-safe calls, ordered results, approvals, repeat detection, diagnostics after edits, continuation on output-length stops. |
+| `src/agent/prompts.ts` | Main / explore / general system prompts plus a cached environment block (OS, shell, project profile, git branch, root listing, `AGENTS.md`/`CLAUDE.md` instructions). |
+| `src/agent/compaction.ts` | Token estimate, tool-output elision, LLM summarization, repair of interrupted tool calls. |
+| `src/agent/tools/*` | Tool implementations (below). |
+| `src/agent/workspace.ts` | Path containment, editor-aware read/write, version tokens, diff stats. |
+| `src/agent/diagnostics.ts` | Waits briefly for language servers and reports errors in edited files. |
+| `src/agent/permissions.ts` | Permission modes and session "always allow" rules. |
+| `src/agent/snapshots.ts` | In-memory pre-edit contents for VS Code's diff editor. |
+| `src/agent/analyzer.ts` | Detects language, framework, package manager, and build/test commands. |
+| `src/session/controller.ts` | Owns the active session: runs turns, queues messages sent mid-run, batches UI updates (40 ms), approvals, usage, per-turn changed-file summary, model listing. |
+| `src/session/store.ts` | Chat history in `workspaceState` (nothing is written into the repository). |
+| `src/ui/chatViewProvider.ts` | Webview HTML with a strict CSP; `retainContextWhenHidden` keeps runs visible when the panel is hidden. |
+| `media/chat.js`, `media/chat.css` | Dependency-free UI: transcript, markdown renderer, tool/subagent cards, todos, approval cards, composer, model and history menus. Styled entirely with VS Code theme tokens. |
 
-### Agent Core & Memory
-* **[src/agent/sessionManager.ts](file:///d:/inittest_vsext/gbs-local-dev/src/agent/sessionManager.ts)**
-  * **Role:** Persistent session manager managing `TaskMemory` and `SessionMemory`.
-  * **Key Features:**
-    * Keeps chat history in memory.
-    * Persists completed goal summaries to `.vscode/bunker-session.json` with workspace isolation path hashing.
-    * Registers listeners to reset state when the active workspace folder changes.
-* **[src/agent/contextRetrieval.ts](file:///d:/inittest_vsext/gbs-local-dev/src/agent/contextRetrieval.ts)**
-  * **Role:** Context Retrieval Service that scores/ranks matching workspace files, lazily indexes symbols, queries related files, and filters prior sessions for relevance.
-* **[src/agent/agentLoop.ts](file:///d:/inittest_vsext/gbs-local-dev/src/agent/agentLoop.ts)**
-  * **Role:** Orchestrates the step-by-step thinking loop of the agent (max 20 iterations).
-  * **Key Functions/Helpers:**
-    * `runAgent()`: Orchestrates execution, resets `TaskMemory` per request, tracks discovery counters, initializes generic task plans, and enforces budgets.
-    * `detectLoopPattern()`: Signature-based repeated/reversed edit detection.
-    * `extractToolCalls()`: Parses JSON blocks.
-    * `extractRejectedFiles()`: Parses optional irrelevant files marked by the model to exclude them from future review.
-    * `updatePlanProgress()`: Automatically marks task subtasks as completed.
-* **[src/agent/context.ts](file:///d:/inittest_vsext/gbs-local-dev/src/agent/context.ts)**
-  * **Role:** Handles prompt composition and keeps conversation history.
-* **[src/agent/budget.ts](file:///d:/inittest_vsext/gbs-local-dev/src/agent/budget.ts)**
-  * **Role:** Controls prompt context size. Refactors prompts to follow the structured context layout (Repository Profile, Workspace Snapshot, Working Context, Task Plan, Goal, Task Memory [Active, Related, Visited, and Rejected files], Relevance-Filtered Session Learning, and User Request).
-* **[src/agent/types.ts](file:///d:/inittest_vsext/gbs-local-dev/src/agent/types.ts)**
-  * **Role:** Defines standard types (`TaskMemory`, `SessionMemory`, `AgentSession`, `RunningAgent`, `TaskPlan`, `TaskSubtask`).
+## Tools
 
-### Repository & Cache
-* **[src/agent/cache.ts](file:///d:/inittest_vsext/gbs-local-dev/src/agent/cache.ts)**
-  * **Role:** Singleton workspace cache storing workspace files list and contents, and generating `WorkspaceSnapshot` records.
-* **[src/agent/analyzer.ts](file:///d:/inittest_vsext/gbs-local-dev/src/agent/analyzer.ts)**
-  * **Role:** Analyzes root configuration files to identify project language and framework.
+| Tool | Notes |
+|---|---|
+| `read_file` | Line-numbered output, `offset`/`limit` (1000 lines by default), binary detection. Records the file's version for the edit guard. |
+| `edit_file` | Exact string replacement (`replace_all` optional), CRLF tolerant, near-miss hint on failure. Requires an up-to-date read. |
+| `write_file` | Create or overwrite; overwriting requires an up-to-date read. |
+| `grep` | VS Code's bundled ripgrep (JS fallback); `files_with_matches` / `content` / `count`, glob filter, result caps. |
+| `glob` | `workspace.findFiles` with dependency/build folders excluded, 200-result cap. |
+| `list_dir` | One directory level. |
+| `run_command` | Non-interactive shell with timeout, process-tree kill on timeout/stop, head+tail output truncation, live output in the UI. |
+| `todo_write` | Task checklist shown above the composer. |
+| `task` | Subagent. `explore` gets read-only tools and runs concurrently; `general` can edit and run commands. Only its final report enters the main context. |
 
-### Validation & Verification
-* **[src/agent/validator.ts](file:///d:/inittest_vsext/gbs-local-dev/src/agent/validator.ts)**
-  * **Role:** Verifies project correctness after modifications.
-* **[src/agent/errorExtractor.ts](file:///d:/inittest_vsext/gbs-local-dev/src/agent/errorExtractor.ts)**
-  * **Role:** Compresses build failure logs.
+Read-only tools (and explore subagents) run in parallel when the model batches them. Mutating tools run sequentially in the order requested.
 
----
+## Keeping token usage low
 
-## 3. Tool Ecosystem
+- **Stable prefix.** The system prompt and tool schemas are byte-identical for every step of a session (the environment block is cached). History is append-only, so Ollama's KV cache and provider prompt caches are reused. Fixed overhead is about 2.6k tokens for the main agent and about 1.2k for explore subagents.
+- **Subagents.** Broad searches happen in a subagent's own context and return a short report. `gbsAgent.subagentModel` can point at a smaller, cheaper model.
+- **Bounded tool output.** Reads are ranged, searches are capped, command output keeps only head and tail, and everything is truncated at `gbsAgent.maxToolOutputChars`.
+- **Compaction.** When a new turn starts, large tool outputs from earlier turns are replaced with stubs. When the estimated prompt nears the context window, older tool outputs are elided first, then older history is summarized by the model (`/compact` forces this).
+- **Diagnostics instead of builds.** After edits, the agent gets language-server errors for the changed files. It no longer runs a full build after every step. The model runs build/test commands only when warranted.
+- **No heuristic nagging.** Context is no longer thrown away, so the old anti-loop warnings (which were themselves appended to every prompt) are gone. A single note is added only when the exact same call repeats three times.
 
-All tools extend the `Tool` interface and are registered inside **[src/agent/registry.ts](file:///d:/inittest_vsext/gbs-local-dev/src/agent/registry.ts)**:
+## Permissions
 
-1. **`list_workspace_files` ([listFiles.ts](file:///d:/inittest_vsext/gbs-local-dev/src/agent/tools/listFiles.ts))**: Exposes relative paths of all workspace files.
-2. **`read_file` ([readFile.ts](file:///d:/inittest_vsext/gbs-local-dev/src/agent/tools/readFile.ts))**: Reads content from files.
-3. **`write_file` ([writeFile.ts](file:///d:/inittest_vsext/gbs-local-dev/src/agent/tools/writeFile.ts))**: Overwrites or creates complete file contents.
-4. **`create_file` ([createFile.ts](file:///d:/inittest_vsext/gbs-local-dev/src/agent/tools/createFile.ts))**: Initializes new files.
-5. **`replace_in_file` ([replaceInFile.ts](file:///d:/inittest_vsext/gbs-local-dev/src/agent/tools/replaceInFile.ts))**: Search-and-replace tool. Normalizes line endings and immediately returns `"NO_CHANGES_REQUIRED"` if search and replace blocks match.
-6. **`search_symbols` ([searchSymbols.ts](file:///d:/inittest_vsext/gbs-local-dev/src/agent/tools/searchSymbols.ts))**: Performs efficient symbol searches via index, falling back to text.
-7. **`run_terminal_command` ([runCommand.ts](file:///d:/inittest_vsext/gbs-local-dev/src/agent/tools/runCommand.ts))**: Runs shell operations in the workspace root.
-8. **`finish` ([finish.ts](file:///d:/inittest_vsext/gbs-local-dev/src/agent/tools/finish.ts))**: Terminating tool to signal task completion. Generates task summaries and updates SessionMemory.
-9. **`get_directory_context` ([getDirectoryContext.ts](file:///d:/inittest_vsext/gbs-local-dev/src/agent/tools/getDirectoryContext.ts))**: Fetches directory structure, including sibling files, child routes, and nearby components/pages to avoid full workspace scans.
+`gbsAgent.permissionMode` (switchable from the composer):
 
----
+- `ask`: approve every edit and command.
+- `acceptEdits` (default): edits apply automatically; commands need approval. Read-only git/ls commands without shell operators are pre-approved.
+- `auto`: never ask.
 
-## 4. Loop Prevention & Termination Heuristics
+"Always allow" remembers a command prefix (e.g. `npm run build`) or all edits for the rest of the session. Every edit records a snapshot. The turn summary and tool rows have a diff button that opens VS Code's diff editor.
 
-The agent loop utilizes deterministic heuristics to prevent runaway reasoning loops and reduce token consumption:
+## UI protocol
 
-* **Task Planning Layer**: Initializes a generic 5-step task plan template at startup, and automatically tracks progress/marks checkboxes during execution.
-* **Proactive Context Retrieval Service**: Scores/ranks matching workspace files, lazily indexes symbols on-demand, filters historical sessions for keyword/file relevance, and injects `Working Context` directly into prompt builders before execution.
-* **Proactive Sibling & Related File Injection**: Appends Same Directory, Child Routes, and Nearby Components (capped at 10) to successful `read_file` responses, providing local workspace awareness without requiring additional tool calls.
-* **Adaptive Discovery Blocking**: Discovery tools (`list_workspace_files`, `search_symbols`) are deprioritized, allowing up to 3 discovery attempts and blocking if no new files/symbols are found.
-* **Discovery Budget**:
-  * Excludes `read_file`, applying only to `list_workspace_files` and `search_symbols`.
-  * **Warning (at 15 calls)**: Nudges the model that sufficient context has been reviewed.
-  * **Hard Block (at 30 calls)**: Blocks discovery tool execution and returns a choice selection warning, forcing the model to proceed to edit or finish.
-* **Repeated Reads Warning**: If the same file is read more than 3 times without modification, returns a warning instructing the model not to read it again.
-* **Alternating Pattern Warning**: If the model alternates between `list_workspace_files` and `read_file` 3 times, returns a warning that the model appears to be stuck.
-* **Repeated Discovery Warning**: Injects warnings if the same file or query is requested again in the same task run.
-* **Duplicate Read Protection**: If a file is re-read by the agent and its content matches the cache from the previous read, the loop returns cached content and appends a warning reminder.
-* **Modification Budgets**:
-  * **Per-File Budget**: Caps edits to a single file at 5 per execution.
-  * **Global Budget**: Caps total edits across all files at 15 per execution.
-* **Completion Heuristic & Hints**:
-  * Completion reminder matches compile status, modification count, and completed objectives count.
-  * Hint counter compiles subtle warnings (reads, budgets, loops, passes). When `finishHints >= 3`, a strong finish warning is appended.
+The host is the source of truth. The webview sends `ready`, `send`, `stop`, `approve`, `newChat`, `switchSession`, `deleteSession`, `openFile`, `openDiff`, `setConfig`, `listModels`, and `openSettings`. The host replies with `init` (full state), then incremental `patch` messages (changed transcript items, removed ids, activity, usage, title), plus `running`, `todos`, `sessions`, `config`, `editor`, and `models`.
 
+Transcript items (`src/agent/transcript.ts`) are `user`, `assistant` (streaming text and thinking), `tool` (status, title, output preview, live tail, diff stats, approval request, subagent progress, optional `parentId` for nesting), `notice`, and `summary`.
+
+## Testing
+
+- `npm test` runs the integration suite in a real VS Code instance against a throwaway fixture workspace (`.vscode-test/fixture-workspace`). It covers the tools against real VS Code APIs, workspace containment, the stale-read guard, diagnostics, and full agent turns through `SessionController` against a mock Ollama server, including parallel explore subagents and stopping during an approval.
