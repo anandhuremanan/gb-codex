@@ -125,8 +125,9 @@
       return `\u0000${codes.length - 1}\u0000`;
     });
     s = esc(s);
-    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => `<a href="${url}">${label}</a>`);
-    s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]+[^\s<).,;:!?])/g, (_, pre, url) => `${pre}<a href="${url}">${url}</a>`);
+    // The title shows where a link really goes, since the label can say anything.
+    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => `<a href="${url}" title="${url}">${label}</a>`);
+    s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]+[^\s<).,;:!?])/g, (_, pre, url) => `${pre}<a href="${url}" title="${url}">${url}</a>`);
     s = s.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
     s = s.replace(/(^|[^\w])__([^_\n]+)__(?!\w)/g, "$1<strong>$2</strong>");
     s = s.replace(/(^|[^\w*])\*([^*\s][^*\n]*?)\*(?!\w)/g, "$1<em>$2</em>");
@@ -657,18 +658,63 @@
     approvalKey = key;
     els.approvals.innerHTML = pending
       .map((item) => {
-        const isCommand = item.approval.kind === "command";
+        const a = item.approval;
+        const isCommand = a.kind === "command";
+        const title = isCommand ? "Run this command?" : a.kind === "read" ? "Read a file that may contain secrets?" : "Allow this edit?";
+        const warnings = approvalWarnings(a);
         return `<div class="approval" data-approval="${item.id}">
-          <div class="approval-title">${icon("shield")}<span>${isCommand ? "Run this command?" : "Allow this edit?"}</span></div>
-          <pre class="approval-detail">${esc(item.approval.detail)}</pre>
+          <div class="approval-title">${icon("shield")}<span>${title}</span></div>
+          ${warnings.map((w) => `<div class="approval-warning">${icon("alert")}<span>${esc(w)}</span></div>`).join("")}
+          <pre class="approval-detail">${revealHidden(a.detail)}</pre>
+          ${a.preview ? `<pre class="approval-preview">${revealHidden(a.preview)}</pre>` : ""}
           <div class="approval-actions">
             <button class="btn primary" data-approve="once" data-id="${item.id}">${isCommand ? "Run" : "Allow"}</button>
-            <button class="btn" data-approve="always" data-id="${item.id}">${inline(item.approval.alwaysLabel || "Always allow")}</button>
+            ${a.alwaysLabel ? `<button class="btn" data-approve="always" data-id="${item.id}">${inline(a.alwaysLabel)}</button>` : ""}
             <button class="btn danger" data-approve="deny" data-id="${item.id}">Deny</button>
           </div>
         </div>`;
       })
       .join("");
+  }
+
+  // Zero-width and bidirectional control characters can make displayed text differ from what runs.
+  const HIDDEN_CHARS = new RegExp(
+    `[${[[0x200b, 0x200f], [0x202a, 0x202e], [0x2060, 0x2064], [0x2066, 0x2069], [0xfeff, 0xfeff]]
+      .map(([from, to]) => `${String.fromCharCode(from)}-${String.fromCharCode(to)}`)
+      .join("")}]`,
+    "g",
+  );
+
+  /** Escapes text and replaces invisible characters with visible markers. */
+  function revealHidden(text) {
+    return esc(text).replace(
+      HIDDEN_CHARS,
+      (c) => `<mark class="hidden-char">U+${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")}</mark>`,
+    );
+  }
+
+  function approvalWarnings(approval) {
+    const warnings = [];
+    const text = `${approval.detail}\n${approval.preview || ""}`;
+    HIDDEN_CHARS.lastIndex = 0;
+    if (HIDDEN_CHARS.test(text)) {
+      warnings.push("Contains invisible or text-direction characters (highlighted). The text may not do what it appears to.");
+    }
+    if (approval.kind === "command") {
+      if (/[;&|\n]/.test(approval.detail)) {
+        warnings.push("Runs more than one command or pipes output between programs.");
+      }
+      if (/[<>]/.test(approval.detail)) {
+        warnings.push("Reads or writes files through redirection.");
+      }
+      if (/\b(curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod|certutil|bitsadmin|scp|ssh|nc|ncat)\b/i.test(approval.detail)) {
+        warnings.push("Contacts the network.");
+      }
+    }
+    if (approval.kind === "edit" && !approval.alwaysLabel) {
+      warnings.push("This file controls tooling, scripts, CI, or credentials; review the change carefully.");
+    }
+    return warnings;
   }
 
   function renderActivity() {
@@ -696,7 +742,11 @@
   function renderConfig() {
     const c = state.config;
     els.modelLabel.textContent = c.model || "Select model";
-    $("#model-chip").title = `${c.provider === "openai" ? "OpenAI-compatible" : "Ollama"} · ${c.model}${c.subagentModel ? `\nSubagents: ${c.subagentModel}` : ""}`;
+    const chip = $("#model-chip");
+    chip.classList.toggle("remote", !!c.remote);
+    chip.title = `${c.provider === "openai" ? "OpenAI-compatible" : "Ollama"} · ${c.model}${c.subagentModel ? `\nSubagents: ${c.subagentModel}` : ""}${
+      c.remote ? `\nRemote model: your code is sent to ${c.remote}` : "\nLocal model: code stays on this machine"
+    }`;
     els.modeLabel.textContent = MODE_LABELS[c.permissionMode] || c.permissionMode;
     els.modeChip.title = `${MODE_TITLES[c.permissionMode] || ""} — click to change`;
     els.modeChip.classList.toggle("mode-auto", c.permissionMode === "auto");

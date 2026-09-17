@@ -1,4 +1,5 @@
 import { Tool } from "./types";
+import { isSensitiveRead } from "../permissions";
 import { readText, relPath, resolvePath, versionToken } from "../workspace";
 
 const DEFAULT_LIMIT = 1000;
@@ -24,6 +25,10 @@ export const readFileTool: Tool<Args> = {
     required: ["path"],
   },
   readOnly: true,
+  permission: (a) => {
+    const rel = relPath(resolvePath(a.path));
+    return isSensitiveRead(rel) ? { kind: "read", detail: `Read ${rel} (may contain credentials)`, path: rel } : undefined;
+  },
   title: (a) => {
     const range = a.offset || a.limit ? ` · lines ${a.offset ?? 1}–${(a.offset ?? 1) + (a.limit ?? DEFAULT_LIMIT) - 1}` : "";
     return `${a.path}${range}`;

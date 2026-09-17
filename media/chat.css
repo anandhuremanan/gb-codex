@@ -1111,17 +1111,54 @@ kbd {
   color: var(--warn);
 }
 
-.approval-detail {
+.approval-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 0.9em;
+  color: var(--warn);
+}
+
+.approval-warning svg {
+  margin-top: 2px;
+}
+
+.hidden-char {
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--err);
+  color: var(--bg);
+  font-size: 0.85em;
+}
+
+.chip.remote::after {
+  content: "cloud";
+  margin-left: 2px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 0.85em;
+  background: color-mix(in srgb, var(--warn) 20%, transparent);
+  color: var(--warn);
+}
+
+/* Commands are shown in full so nothing can hide below a scroll boundary. */
+.approval-detail,
+.approval-preview {
   margin: 0;
   padding: 6px 8px;
-  max-height: 140px;
-  overflow: auto;
+  overflow-x: auto;
   font-family: var(--mono);
   font-size: 0.9em;
   white-space: pre-wrap;
   word-break: break-all;
   background: var(--vscode-textCodeBlock-background, var(--surface));
   border-radius: var(--radius-sm);
+}
+
+.approval-preview {
+  max-height: 200px;
+  overflow-y: auto;
+  opacity: 0.9;
 }
 
 .approval-actions {

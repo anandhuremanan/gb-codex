@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { AgentConfig, getApiKey, readConfig, updateConfig } from "../config";
+import { AgentConfig, getApiKey, readConfig, remoteDestination, updateConfig } from "../config";
 import { AdaptiveProvider } from "../llm/adaptiveProvider";
 import { CancelledError, isAbortError } from "../llm/http";
 import { OllamaProvider } from "../llm/ollama";
@@ -30,6 +30,10 @@ interface TurnState {
 }
 
 const FLUSH_MS = 40;
+/** Subagents are expensive: cap how many run at once and how many one request may start. */
+const MAX_PARALLEL_SUBAGENTS = 4;
+const MAX_SUBAGENTS_PER_TURN = 12;
+const REMOTE_CONSENT_KEY = "gbsAgent.remoteConsent";
 const SAVE_DEBOUNCE_MS = 1500;
 
 function emptySession(): StoredSession {
@@ -55,7 +59,9 @@ export class SessionController implements AgentHost, vscode.Disposable {
   private view?: ChatView;
   private abort?: AbortController;
   private runPromise?: Promise<void>;
-  private turn?: TurnState;
+  private turn?: TurnState & { subagents: number };
+  private activeSubagents = 0;
+  private readonly subagentWaiters: Array<() => void> = [];
   private activity = "";
   private queued: string[] = [];
   private readonly approvals = new Map<string, (decision: ApprovalDecision) => void>();
@@ -137,6 +143,7 @@ export class SessionController implements AgentHost, vscode.Disposable {
       subagentModel: c.subagentModel,
       permissionMode: c.permissionMode,
       contextWindow: c.contextWindow,
+      remote: remoteDestination(c, c.model),
     };
   }
 
@@ -337,7 +344,7 @@ export class SessionController implements AgentHost, vscode.Disposable {
     const session = this.session;
     const abort = new AbortController();
     this.abort = abort;
-    this.turn = { startedAt: Date.now(), inputTokens: 0, outputTokens: 0, files: new Map() };
+    this.turn = { startedAt: Date.now(), inputTokens: 0, outputTokens: 0, files: new Map(), subagents: 0 };
     if (session.todos.length && session.todos.every((t) => t.status === "completed")) {
       this.setTodos([]); // a finished checklist belongs to the previous request
     }
@@ -353,6 +360,11 @@ export class SessionController implements AgentHost, vscode.Disposable {
 
     try {
       const cfg = this.config;
+      if (!(await this.confirmRemote(cfg.model))) {
+        messages.pop();
+        this.notice("warning", "Cancelled: the conversation was not sent to the remote model.");
+        return;
+      }
       const provider = this.createProvider("main");
       const agent = new Agent({
         kind: "main",
@@ -432,6 +444,10 @@ export class SessionController implements AgentHost, vscode.Disposable {
       this.notice("info", "The conversation is already short; nothing to compact.");
       return;
     }
+    if (!(await this.confirmRemote(this.config.model))) {
+      this.notice("warning", "Cancelled: the conversation was not sent to the remote model.");
+      return;
+    }
     const abort = new AbortController();
     this.abort = abort;
     this.activity = "Compacting conversation…";
@@ -501,7 +517,7 @@ export class SessionController implements AgentHost, vscode.Disposable {
             model,
             maxOutputTokens: cfg.maxOutputTokens,
             temperature: cfg.temperature,
-            getApiKey: () => getApiKey(this.context.secrets, true),
+            getApiKey: () => getApiKey(this.context.secrets, cfg.openaiBaseUrl, true),
           })
         : new OllamaProvider({
             baseUrl: cfg.ollamaBaseUrl,
@@ -513,8 +529,65 @@ export class SessionController implements AgentHost, vscode.Disposable {
     return new AdaptiveProvider(inner, (m) => this.log(m));
   }
 
+  /**
+   * Asks once per destination before code and chat content are sent off this machine
+   * (remote endpoints and Ollama ":cloud" models).
+   */
+  private async confirmRemote(model: string): Promise<boolean> {
+    const destination = remoteDestination(this.config, model);
+    const state = this.context.globalState;
+    if (!destination || !state) {
+      return true;
+    }
+    const approved = state.get<string[]>(REMOTE_CONSENT_KEY, []);
+    if (approved.includes(destination)) {
+      return true;
+    }
+    const allow = "Allow";
+    const choice = await vscode.window.showWarningMessage(
+      `Send your code to ${destination}?`,
+      {
+        modal: true,
+        detail: `The model "${model}" runs outside this machine. File contents the agent reads, command output, and your editor selection will be sent to ${destination}. You will only be asked once for this destination.`,
+      },
+      allow,
+    );
+    if (choice !== allow) {
+      return false;
+    }
+    await state.update(REMOTE_CONSENT_KEY, [...approved, destination]);
+    return true;
+  }
+
   async runSubagent(request: SubagentRequest): Promise<string> {
     const cfg = this.config;
+    if (this.turn) {
+      if (this.turn.subagents >= MAX_SUBAGENTS_PER_TURN) {
+        return `Subagent not started: this request already used ${MAX_SUBAGENTS_PER_TURN} subagents. Continue with the information you have, or use the search tools directly.`;
+      }
+      this.turn.subagents++;
+    }
+    const subagentModel = cfg.subagentModel || cfg.model;
+    if (!(await this.confirmRemote(subagentModel))) {
+      return "Subagent not started: the user did not allow sending code to the subagent's remote model.";
+    }
+    while (this.activeSubagents >= MAX_PARALLEL_SUBAGENTS) {
+      this.updateSubagent(request.parentItemId, "Queued…");
+      await new Promise<void>((resolve) => this.subagentWaiters.push(resolve));
+      if (request.signal.aborted) {
+        throw new CancelledError();
+      }
+    }
+    this.activeSubagents++;
+    try {
+      return await this.startSubagent(request, cfg);
+    } finally {
+      this.activeSubagents--;
+      this.subagentWaiters.shift()?.();
+    }
+  }
+
+  private async startSubagent(request: SubagentRequest, cfg: AgentConfig): Promise<string> {
     const messages = [{ role: "user" as const, content: request.prompt }];
     const agent = new Agent({
       kind: request.type,
@@ -762,15 +835,16 @@ export class SessionController implements AgentHost, vscode.Disposable {
   }
 
   private async setConfig(config: Record<string, unknown>): Promise<void> {
-    const keys: Record<string, string> = {
-      provider: "provider",
-      model: "model",
-      subagentModel: "subagentModel",
-      permissionMode: "permissionMode",
+    const validators: Record<string, (v: string) => boolean> = {
+      provider: (v) => v === "ollama" || v === "openai",
+      model: (v) => v.length <= 200 && !/[\r\n]/.test(v),
+      subagentModel: (v) => v.length <= 200 && !/[\r\n]/.test(v),
+      permissionMode: (v) => v === "ask" || v === "acceptEdits" || v === "auto",
     };
     for (const [key, value] of Object.entries(config)) {
-      if (keys[key] && typeof value === "string") {
-        await updateConfig(keys[key], value.trim());
+      const valid = validators[key];
+      if (valid && typeof value === "string" && valid(value.trim())) {
+        await updateConfig(key, value.trim());
       }
     }
     this.post({ type: "config", config: this.uiConfig() });
@@ -784,9 +858,10 @@ export class SessionController implements AgentHost, vscode.Disposable {
         const json: any = await res.json();
         return (json.models ?? []).map((m: any) => String(m.name)).sort();
       }
-      const key = await getApiKey(this.context.secrets, false);
+      const key = await getApiKey(this.context.secrets, cfg.openaiBaseUrl, false);
       const res = await fetch(`${cfg.openaiBaseUrl.replace(/\/+$/, "")}/models`, {
         headers: key ? { Authorization: `Bearer ${key}` } : {},
+        redirect: "error",
         signal: AbortSignal.timeout(6000),
       });
       const json: any = await res.json();
@@ -795,6 +870,19 @@ export class SessionController implements AgentHost, vscode.Disposable {
       this.log(`[models] could not list models: ${err}`);
       return [];
     }
+  }
+
+  /** Deletes every stored chat for this workspace. */
+  async clearHistory(): Promise<void> {
+    await this.stopAndWait();
+    for (const meta of this.store.list()) {
+      await this.store.delete(meta.id);
+    }
+    this.session = emptySession();
+    this.permissions.reset();
+    this.indexItems();
+    await this.store.setActive(this.session.id);
+    this.postInit();
   }
 
   dispose(): void {

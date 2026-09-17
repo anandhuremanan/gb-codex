@@ -1,5 +1,5 @@
 import { Tool } from "./types";
-import { checkFreshRead } from "./editFile";
+import { checkFreshRead, previewText } from "./editFile";
 import { exists, lineDiffStats, readText, relPath, resolvePath, versionToken, writeText } from "../workspace";
 
 interface Args {
@@ -20,7 +20,10 @@ export const writeFileTool: Tool<Args> = {
     required: ["path", "content"],
   },
   readOnly: false,
-  permission: (a) => ({ kind: "edit", detail: `Write ${a.path}` }),
+  permission: (a) => {
+    const rel = relPath(resolvePath(a.path));
+    return { kind: "edit", detail: `Write ${rel}`, path: rel, preview: previewText(a.content) };
+  },
   title: (a) => a.path,
   async execute(args, ctx) {
     if (typeof args.content !== "string") {

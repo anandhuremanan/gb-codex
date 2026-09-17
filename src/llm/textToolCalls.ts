@@ -68,49 +68,70 @@ function toCall(obj: Record<string, unknown>, allowed: Set<string>): ToolCall | 
 }
 
 /**
- * Extracts tool calls written as text: `<tool_call>{...}</tool_call>` blocks
- * (Qwen/Hermes style) or fenced JSON blocks naming a known tool.
+ * Extracts tool calls written as text.
+ *
+ * Only a trailing run of `<tool_call>{...}</tool_call>` blocks counts, with no code fence before it:
+ * tool-call syntax that appears mid-answer or inside a code block is prose (for example a quoted file
+ * containing an injected tool call) and must never execute. In `text` mode — models without native
+ * tool support — a reply consisting of nothing but one JSON object/array (optionally fenced) is also
+ * accepted, because small models often ignore the tag format.
  */
-export function parseTextToolCalls(text: string, allowedNames: Iterable<string>): { calls: ToolCall[]; text: string } {
+export function parseTextToolCalls(
+  text: string,
+  allowedNames: Iterable<string>,
+  mode: "native" | "text" = "native",
+): { calls: ToolCall[]; text: string } {
   const allowed = new Set(allowedNames);
-  const calls: ToolCall[] = [];
-  let cleaned = text;
+  const none = { calls: [] as ToolCall[], text };
 
-  const tagRegex = /<tool_call>([\s\S]*?)(?:<\/tool_call>|$)/g;
-  if (text.includes(OPEN_TAG)) {
-    for (const match of text.matchAll(tagRegex)) {
+  const first = text.indexOf(OPEN_TAG);
+  if (first >= 0) {
+    const prose = text.slice(0, first);
+    const blocks = text.slice(first);
+    // Everything from the first tag on must be tool-call blocks (the last may be unterminated).
+    const blockRegex = /^\s*<tool_call>([\s\S]*?)(?:<\/tool_call>|$)/;
+    const calls: ToolCall[] = [];
+    let rest = blocks;
+    while (rest.trim()) {
+      const match = rest.match(blockRegex);
+      if (!match) {
+        return none;
+      }
       const parsed = parseArguments(match[1]);
       const call = parsed && toCall(parsed, allowed);
-      if (call) {
-        calls.push(call);
+      if (!call) {
+        return none;
       }
+      calls.push(call);
+      rest = rest.slice(match[0].length);
     }
-    cleaned = text.replace(tagRegex, "");
+    if (prose.includes("```")) {
+      return none;
+    }
+    return { calls, text: prose.trim() };
   }
 
-  if (calls.length === 0) {
-    const fenceRegex = /```(?:json|tool_call|tool)?\s*\n([\s\S]*?)```/g;
-    for (const match of text.matchAll(fenceRegex)) {
-      const body = match[1].trim();
-      let values: unknown[] = [];
-      try {
-        const parsed = JSON.parse(body);
-        values = Array.isArray(parsed) ? parsed : [parsed];
-      } catch {
-        const obj = parseArguments(body);
-        values = obj ? [obj] : [];
-      }
-      const found = values
-        .map((v) => (v && typeof v === "object" ? toCall(v as Record<string, unknown>, allowed) : undefined))
-        .filter((c): c is ToolCall => !!c);
-      if (found.length) {
-        calls.push(...found);
-        cleaned = cleaned.replace(match[0], "");
-      }
+  if (mode === "text") {
+    const body = text
+      .trim()
+      .replace(/^```(?:json|tool_call|tool)?\s*\n([\s\S]*?)\n?```$/, "$1")
+      .trim();
+    if (!body.startsWith("{") && !body.startsWith("[")) {
+      return none;
+    }
+    let values: unknown[];
+    try {
+      const parsed = JSON.parse(body);
+      values = Array.isArray(parsed) ? parsed : [parsed];
+    } catch {
+      return none;
+    }
+    const calls = values.map((v) => (v && typeof v === "object" ? toCall(v as Record<string, unknown>, allowed) : undefined));
+    if (calls.length && calls.every((c): c is ToolCall => !!c)) {
+      return { calls, text: "" };
     }
   }
-
-  return { calls, text: calls.length ? cleaned.trim() : text };
+  return none;
 }
 
 /**
@@ -125,10 +146,10 @@ export class ToolMarkupFilter {
   constructor(private readonly emit: (delta: string) => void) {}
 
   push(delta: string): void {
+    this.full += delta;
     if (this.blocked) {
       return;
     }
-    this.full += delta;
     const tagIndex = this.full.indexOf(OPEN_TAG);
     let safeEnd: number;
     if (tagIndex >= 0) {
@@ -154,6 +175,12 @@ export class ToolMarkupFilter {
       this.emit(this.full.slice(this.emitted));
       this.emitted = this.full.length;
     }
+  }
+
+  /** Shows text that was held back because it looked like tool markup but was not executed. */
+  release(): void {
+    this.blocked = false;
+    this.flush();
   }
 }
 

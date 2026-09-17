@@ -1,3 +1,4 @@
+import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
 
@@ -30,26 +31,60 @@ export function getRoot(): vscode.Uri {
   return root;
 }
 
+/** Largest file read_file will load; bigger files should be searched with grep instead. */
+export const MAX_READ_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Resolves symlinks and junctions in `p`. For paths that don't exist yet, the deepest existing
+ * ancestor is resolved and the remaining segments are appended.
+ */
+export function realPath(p: string): string {
+  const missing: string[] = [];
+  let current = p;
+  while (true) {
+    try {
+      return path.join(fs.realpathSync.native(current), ...missing.reverse());
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) {
+        return p;
+      }
+      missing.push(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
 function isInside(parent: string, child: string): boolean {
   const rel = path.relative(parent, child);
   return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }
 
-/** Resolves a user/model supplied path and ensures it stays within an open workspace folder. */
-export function resolvePath(input: string | undefined): vscode.Uri {
+/**
+ * Resolves a user/model supplied path and ensures it stays within an open workspace folder.
+ * Symlinks and junctions are resolved first, so a link inside the workspace cannot reach outside it.
+ */
+export function resolvePath(input: unknown): vscode.Uri {
   const root = getRoot();
+  if (input !== undefined && typeof input !== "string") {
+    throw new Error("Path must be a string.");
+  }
   const raw = (input ?? "").trim().replace(/^["']|["']$/g, "");
-  if (!raw || raw === ".") {
-    return root;
+  if (raw.includes(String.fromCharCode(0))) {
+    throw new Error("Invalid path.");
   }
-  const folders = vscode.workspace.workspaceFolders ?? [];
-  const fsPath = path.isAbsolute(raw) ? path.normalize(raw) : path.resolve(root.fsPath, raw);
+  const folders = (vscode.workspace.workspaceFolders ?? []).filter((f) => f.uri.scheme === "file");
+  const requested = !raw || raw === "." ? root.fsPath : path.isAbsolute(raw) ? path.normalize(raw) : path.resolve(root.fsPath, raw);
+  const resolved = realPath(requested);
   const compare = (p: string) => (process.platform === "win32" ? p.toLowerCase() : p);
-  const inside = folders.some((f) => isInside(compare(f.uri.fsPath), compare(fsPath)));
+  const inside = folders.some((f) => isInside(compare(realPath(f.uri.fsPath)), compare(resolved)));
   if (!inside) {
-    throw new Error(`Path "${input}" is outside the workspace. Only files inside the open workspace can be accessed.`);
+    const viaLink = compare(resolved) !== compare(requested);
+    throw new Error(
+      `Path "${input ?? "."}" is outside the workspace${viaLink ? " (it resolves through a symbolic link)" : ""}. Only files inside the open workspace can be accessed.`,
+    );
   }
-  return vscode.Uri.file(fsPath);
+  return vscode.Uri.file(resolved);
 }
 
 /** Workspace-relative path with forward slashes. */
@@ -95,6 +130,10 @@ export async function readText(uri: vscode.Uri): Promise<string> {
   const doc = openDocument(uri);
   if (doc) {
     return doc.getText();
+  }
+  const stat = await vscode.workspace.fs.stat(uri);
+  if (stat.size > MAX_READ_BYTES) {
+    throw new Error(`${relPath(uri)} is too large to read (${Math.round(stat.size / 1024 / 1024)} MB). Use grep to find the relevant part.`);
   }
   const bytes = await vscode.workspace.fs.readFile(uri);
   if (looksBinary(bytes)) {

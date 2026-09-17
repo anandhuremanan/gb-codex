@@ -44,7 +44,17 @@ export interface ToolContext {
   fileChanged(uri: vscode.Uri): void;
 }
 
-export type PermissionKind = "edit" | "command";
+export type PermissionKind = "edit" | "command" | "read";
+
+export interface PermissionRequest {
+  kind: PermissionKind;
+  /** What is shown to the user, e.g. the command line or "Edit src/a.ts". */
+  detail: string;
+  /** Workspace-relative path for file operations (after symlink resolution). */
+  path?: string;
+  /** Content preview shown with the approval (e.g. the replacement text of an edit). */
+  preview?: string;
+}
 
 export interface Tool<A = any> {
   name: string;
@@ -53,7 +63,7 @@ export interface Tool<A = any> {
   /** Read-only tools never need approval and may run in parallel. */
   readOnly: boolean;
   isConcurrencySafe?(args: A): boolean;
-  permission?(args: A): { kind: PermissionKind; detail: string } | undefined;
+  permission?(args: A): PermissionRequest | undefined;
   /** Short label for the UI, e.g. a path or command. */
   title(args: A): string;
   execute(args: A, ctx: ToolContext): Promise<ToolResult>;

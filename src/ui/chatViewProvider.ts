@@ -1,3 +1,4 @@
+import { randomBytes } from "crypto";
 import * as vscode from "vscode";
 import { SessionController } from "../session/controller";
 
@@ -24,7 +25,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
 
   private html(webview: vscode.Webview, media: vscode.Uri): string {
-    const nonce = Array.from({ length: 32 }, () => Math.floor(Math.random() * 36).toString(36)).join("");
+    const nonce = randomBytes(18).toString("base64");
     const css = webview.asWebviewUri(vscode.Uri.joinPath(media, "chat.css"));
     const js = webview.asWebviewUri(vscode.Uri.joinPath(media, "chat.js"));
     return `<!DOCTYPE html>

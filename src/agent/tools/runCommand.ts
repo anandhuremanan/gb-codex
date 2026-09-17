@@ -52,6 +52,37 @@ class OutputBuffer {
   }
 }
 
+// Matches whole name segments (HF_TOKEN, AWS_SECRET_ACCESS_KEY, OPENAI_API_KEY) but not SSH_AUTH_SOCK or DBUS_SESSION_BUS_ADDRESS.
+const SECRET_ENV = /(^|_)(TOKEN|SECRET|PASSWORD|PASSWD|PASSPHRASE|APIKEY|KEY|CREDENTIALS?|COOKIE|CONNECTION_?STRING|CONNSTR|PAT)(_|$)/i;
+const HOST_ENV = /^(VSCODE_|ELECTRON_|CHROME_CRASHPAD)/i;
+
+/**
+ * Environment for agent-run commands: the user's environment minus credentials and editor-internal
+ * variables, so a command (or its output sent to the model) can't leak them.
+ */
+export function commandEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [name, value] of Object.entries(source)) {
+    if (value !== undefined && !SECRET_ENV.test(name) && !HOST_ENV.test(name)) {
+      env[name] = value;
+    }
+  }
+  return {
+    ...env,
+    NO_COLOR: "1",
+    FORCE_COLOR: "0",
+    GIT_PAGER: "cat",
+    PAGER: "cat",
+    GIT_TERMINAL_PROMPT: "0",
+    // cmd.exe otherwise runs e.g. git.bat from the workspace folder before the real git on PATH.
+    NoDefaultCurrentDirectoryInExePath: "1",
+    // Overrides .git/config (git >= 2.31): a repository's fsmonitor hook would otherwise run on git status.
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "core.fsmonitor",
+    GIT_CONFIG_VALUE_0: "false",
+  };
+}
+
 function killTree(child: ChildProcess): void {
   if (child.pid === undefined || child.exitCode !== null) {
     return;
@@ -111,7 +142,7 @@ export const runCommandTool: Tool<Args> = {
         windowsHide: true,
         detached: process.platform !== "win32",
         stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0", GIT_PAGER: "cat", PAGER: "cat", GIT_TERMINAL_PROMPT: "0" },
+        env: commandEnvironment(),
       });
 
       let liveTimer: NodeJS.Timeout | undefined;

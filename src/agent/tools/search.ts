@@ -5,6 +5,7 @@ import * as vscode from "vscode";
 import { Tool } from "./types";
 import { EXCLUDED_DIRS, EXCLUDE_GLOB, getRoot, looksBinary, relPath, resolvePath } from "../workspace";
 import { throwIfAborted } from "../../llm/http";
+import { SECRET_FILE_GLOBS } from "../permissions";
 
 const GLOB_LIMIT = 200;
 
@@ -188,7 +189,21 @@ function runRipgrep(rg: string, rgArgs: string[], cwd: string, maxLines: number,
   });
 }
 
+/** Nested quantifiers such as (a+)+ and backreferences can backtrack for minutes on a single line. */
+export function isRiskyRegex(pattern: string): boolean {
+  return pattern.length > 300 || /\([^()]*[+*}][^()]*\)\s*[+*{]/.test(pattern) || /\\[1-9]/.test(pattern);
+}
+
+/** Converts SECRET_FILE_GLOBS ("!*.pem") into path-suffix regexes for the fallback search. */
+const SECRET_FILE_PATTERNS = SECRET_FILE_GLOBS.map(
+  (glob) => new RegExp(`(^|/)${glob.slice(1).replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*")}$`, "i"),
+);
+
 async function grepFallback(args: GrepArgs, base: vscode.Uri, maxLines: number, signal: AbortSignal): Promise<string[]> {
+  // This fallback runs on the extension host thread, where a catastrophic regex would freeze VS Code.
+  if (isRiskyRegex(args.pattern)) {
+    throw new Error("Pattern is too complex for the built-in search (nested quantifiers or backreferences). Simplify it.");
+  }
   const regex = new RegExp(args.pattern, args.case_insensitive ? "i" : "");
   const include = new vscode.RelativePattern(base, args.glob ? (args.glob.includes("/") ? args.glob : `**/${args.glob}`) : "**/*");
   const files = await vscode.workspace.findFiles(include, EXCLUDE_GLOB, 5000);
@@ -209,11 +224,14 @@ async function grepFallback(args: GrepArgs, base: vscode.Uri, maxLines: number, 
     if (looksBinary(bytes)) {
       continue;
     }
-    const lines = new TextDecoder().decode(bytes).split(/\r?\n/);
     const rel = relPath(file);
+    if (SECRET_FILE_PATTERNS.some((re) => re.test(rel))) {
+      continue;
+    }
+    const lines = new TextDecoder().decode(bytes).split(/\r?\n/);
     let count = 0;
     for (let i = 0; i < lines.length; i++) {
-      if (regex.test(lines[i])) {
+      if (regex.test(lines[i].slice(0, 2000))) {
         count++;
         if (mode === "content") {
           out.push(`${rel}:${i + 1}:${lines[i].slice(0, 400)}`);
@@ -279,6 +297,9 @@ export const grepTool: Tool<GrepArgs> = {
       }
       for (const dir of EXCLUDED_DIRS) {
         rgArgs.push("--glob", `!${dir}/`);
+      }
+      for (const glob of SECRET_FILE_GLOBS) {
+        rgArgs.push("--glob", glob);
       }
       rgArgs.push("--regexp", args.pattern);
       const relTarget = path.relative(root.fsPath, target.fsPath);

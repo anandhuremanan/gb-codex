@@ -9,6 +9,13 @@ interface Args {
   replace_all?: boolean;
 }
 
+export function previewText(text: unknown, max = 1500): string | undefined {
+  if (typeof text !== "string") {
+    return undefined;
+  }
+  return text.length > max ? `${text.slice(0, max)}\n… (${text.length - max} more characters)` : text;
+}
+
 /** Ensures the agent has seen the current version of an existing file before modifying it. */
 export async function checkFreshRead(uri: vscode.Uri, ctx: ToolContext): Promise<string | undefined> {
   const seen = ctx.state.readVersions.get(uri.fsPath);
@@ -82,7 +89,10 @@ export const editFileTool: Tool<Args> = {
     required: ["path", "old_string", "new_string"],
   },
   readOnly: false,
-  permission: (a) => ({ kind: "edit", detail: `Edit ${a.path}` }),
+  permission: (a) => {
+    const rel = relPath(resolvePath(a.path));
+    return { kind: "edit", detail: `Edit ${rel}`, path: rel, preview: previewText(a.new_string) };
+  },
   title: (a) => a.path,
   async execute(args, ctx) {
     const uri = resolvePath(args.path);

@@ -4,6 +4,26 @@ All notable changes to the "gbs-local-dev" extension will be documented in this 
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.0.9] - 2026-09-17
+
+### Security
+- A repository's `.vscode/settings.json` can no longer change where code and API keys are sent, the shell, the model, or the approval mode. These settings are read from user settings only. The extension is also disabled in untrusted (Restricted Mode) workspaces.
+- The saved API key is bound to the endpoint it was saved for; sending it anywhere else needs confirmation. Requests never follow redirects.
+- Asks once before sending code to a remote or cloud model (e.g. `:cloud` Ollama models), and shows a "cloud" badge on the model chip.
+- Commands run without approval only when they exactly match a short read-only list (`git status`, `git log --oneline`, `dir`, …). `git diff`/`git show` and any extra arguments now need approval.
+- On Windows, commands no longer run programs from the workspace folder in place of the real ones (e.g. a planted `git.bat`). Git commands can no longer trigger a repository-configured `core.fsmonitor` program.
+- "Always allow" never widens interpreters, downloaders, or destructive commands (`python`, `node`, `curl`, `rm`, …) beyond the exact command, and never covers a bare `npm run`.
+- Edits to files that run code or control tooling always need approval, even in Auto-edit mode: `.vscode`, `.git`, `.github`, `package.json`, scripts, linter/test/build configs (ESLint, Prettier, Jest, Vite, …), `node_modules`, and similar.
+- Reading likely credential files (`.env`, keys, `.npmrc`, …) needs approval, and search skips them.
+- Symbolic links and junctions can no longer be used to read or write outside the workspace.
+- Commands no longer inherit credentials from the editor's environment (tokens, API keys, passwords).
+- Tool-call syntax appearing inside the model's prose or code blocks (for example quoted from a malicious file) is never executed.
+- The system prompt treats file contents and tool output as untrusted data, and repository instruction files can no longer override safety rules.
+- Approval cards show the full command and warn about chained commands, network access, redirection, and invisible or text-direction characters, which are highlighted. Edit approvals preview the new content.
+- Subagents are capped at 4 running at once and 12 per request.
+- Hardening: size and stall limits on model responses, a 10 MB limit for reading files, protection against catastrophic regexes in the fallback search, a cryptographically random webview nonce, and link destinations shown on hover.
+- New command **GBS Agent: Clear Chat History**.
+
 ## [0.0.8] - 2026-09-17
 
 ### Fixed

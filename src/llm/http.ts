@@ -43,6 +43,8 @@ export async function postJson(
       headers: { "Content-Type": "application/json", ...headers },
       body: JSON.stringify(body),
       signal,
+      // Never forward the Authorization header (or the code in the body) to wherever a redirect points.
+      redirect: "error",
     });
   } catch (err) {
     if (signal.aborted || isAbortError(err)) {
@@ -61,8 +63,22 @@ export async function postJson(
   return response;
 }
 
+export interface StreamLimits {
+  /** Total characters accepted before the stream is aborted (protects against endless responses). */
+  maxChars: number;
+  /** Abort when no data arrives for this long. Generous, because large local models can take minutes to load. */
+  idleMs: number;
+}
+
+export const DEFAULT_STREAM_LIMITS: StreamLimits = { maxChars: 20_000_000, idleMs: 5 * 60_000 };
+const MAX_LINE_CHARS = 5_000_000;
+
 /** Yields complete lines from a streamed body, buffering partial lines across chunks. */
-export async function* readLines(body: ReadableStream<Uint8Array>, signal: AbortSignal): AsyncGenerator<string> {
+export async function* readLines(
+  body: ReadableStream<Uint8Array>,
+  signal: AbortSignal,
+  limits: StreamLimits = DEFAULT_STREAM_LIMITS,
+): AsyncGenerator<string> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   const onAbort = () => {
@@ -70,15 +86,38 @@ export async function* readLines(body: ReadableStream<Uint8Array>, signal: Abort
   };
   signal.addEventListener("abort", onAbort, { once: true });
   let buffer = "";
+  let total = 0;
   try {
     while (true) {
-      const chunk = await reader.read().catch((err: unknown) => {
-        throw signal.aborted ? new CancelledError() : err;
+      let idleTimer: NodeJS.Timeout | undefined;
+      let stalled = false;
+      const stallError = () => new Error(`The model server sent no data for ${Math.round(limits.idleMs / 1000)}s; the request was aborted.`);
+      const idle = new Promise<never>((_, reject) => {
+        idleTimer = setTimeout(() => {
+          stalled = true;
+          reader.cancel().catch(() => undefined);
+          reject(stallError());
+        }, limits.idleMs);
       });
+      idle.catch(() => undefined);
+      const chunk = await Promise.race([reader.read(), idle])
+        .catch((err: unknown) => {
+          throw signal.aborted ? new CancelledError() : err;
+        })
+        .finally(() => clearTimeout(idleTimer));
+      if (stalled) {
+        throw stallError();
+      }
       if (chunk.done) {
         break;
       }
-      buffer += decoder.decode(chunk.value, { stream: true });
+      const text = decoder.decode(chunk.value, { stream: true });
+      total += text.length;
+      if (total > limits.maxChars || buffer.length + text.length > MAX_LINE_CHARS) {
+        reader.cancel().catch(() => undefined);
+        throw new Error("The model server response exceeded the size limit; the request was aborted.");
+      }
+      buffer += text;
       let newline: number;
       while ((newline = buffer.indexOf("\n")) >= 0) {
         const line = buffer.slice(0, newline);

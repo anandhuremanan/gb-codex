@@ -45,10 +45,12 @@ export class AdaptiveProvider implements LlmProvider {
         const result = await this.inner.chat(request, { ...callbacks, onText: (d) => filter.push(d) });
         filter.flush();
         if (result.toolCalls.length === 0) {
-          const recovered = parseTextToolCalls(result.text, names);
+          // Only a trailing <tool_call> block is recovered; tool syntax inside prose is never executed.
+          const recovered = parseTextToolCalls(result.text, names, "native");
           if (recovered.calls.length) {
             return { ...result, text: recovered.text, toolCalls: recovered.calls };
           }
+          filter.release();
         }
         return result;
       } catch (err) {
@@ -73,7 +75,10 @@ export class AdaptiveProvider implements LlmProvider {
       { ...callbacks, onText: (d) => filter.push(d) },
     );
     filter.flush();
-    const parsed = parseTextToolCalls(result.text, names);
+    const parsed = parseTextToolCalls(result.text, names, "text");
+    if (!parsed.calls.length) {
+      filter.release();
+    }
     return { ...result, text: parsed.text, toolCalls: parsed.calls };
   }
 }

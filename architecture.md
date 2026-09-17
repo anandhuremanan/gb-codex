@@ -77,10 +77,29 @@ Read-only tools (and explore subagents) run in parallel when the model batches t
 `gbsAgent.permissionMode` (switchable from the composer):
 
 - `ask`: approve every edit and command.
-- `acceptEdits` (default): edits apply automatically; commands need approval. Read-only git/ls commands without shell operators are pre-approved.
+- `acceptEdits` (default): ordinary edits apply automatically; commands need approval. A short list of exact read-only commands is pre-approved (`SAFE_COMMANDS` in `src/agent/permissions.ts`).
 - `auto`: never ask.
 
-"Always allow" remembers a command prefix (e.g. `npm run build`) or all edits for the rest of the session. Every edit records a snapshot. The turn summary and tool rows have a diff button that opens VS Code's diff editor.
+Outside `auto`, these always need approval:
+- Edits to sensitive paths (`SENSITIVE_WRITE`): editor, git, and CI config; `package.json`; scripts; linter, test, and build configs that editor extensions execute automatically; dependency folders.
+- Reads of likely credential files (`SENSITIVE_READ`).
+- Commands containing shell operators or invisible characters.
+
+"Always allow" records a rule (`ruleFor`): a prefix such as `npm run build` or `git commit`, or only the exact command for interpreters, downloaders, and destructive tools. It is never offered for sensitive files or chained commands. Every edit records a snapshot, and the turn summary and tool rows have a diff button that opens VS Code's diff editor.
+
+## Security model
+
+| Threat | Defence |
+|---|---|
+| Hostile `.vscode/settings.json` | Provider, model, endpoints, key, shell, and permission mode are scoped `application`/`machine` and read only from user settings (`PROTECTED_SETTINGS` in `src/config.ts`). `capabilities.untrustedWorkspaces.supported: false`. |
+| API key exfiltration | Secret-storage key bound to its origin (`getApiKey`); `redirect: "error"` on authenticated requests. |
+| Code sent off-machine unknowingly | One-time consent per remote destination (`confirmRemote`); "cloud" badge in the UI. |
+| Prompt injection → actions | Untrusted-content rules in the system prompt; sensitive-path approvals; tool calls only parsed from a trailing `<tool_call>` block, never from prose or code fences (`parseTextToolCalls`). |
+| Command hijacking | `NoDefaultCurrentDirectoryInExePath=1` (Windows), `core.fsmonitor=false` via `GIT_CONFIG_*`, exact-match safe commands. |
+| Credential leakage | Secret-looking environment variables removed from commands (`commandEnvironment`); credential files excluded from grep and gated for reads. |
+| Workspace escape | `resolvePath` resolves symlinks and junctions (`realPath`) before the containment check. |
+| Approval spoofing | Full command shown; warnings for chained, network, and redirect commands; invisible or bidirectional characters highlighted. |
+| Resource abuse | Subagent caps, response size and stall limits, 10 MB read limit, regex guard in the fallback search. |
 
 ## UI protocol
 

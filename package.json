@@ -13,7 +13,7 @@
     "type": "git",
     "url": "https://github.com/anandhuremanan/gb-codex"
   },
-  "version": "0.0.8",
+  "version": "0.0.9",
   "engines": {
     "vscode": "^1.120.0"
   },
@@ -41,6 +41,11 @@
       {
         "command": "gbsAgent.setApiKey",
         "title": "Set API Key",
+        "category": "GBS Agent"
+      },
+      {
+        "command": "gbsAgent.clearHistory",
+        "title": "Clear Chat History",
         "category": "GBS Agent"
       },
       {
@@ -98,19 +103,22 @@
           ],
           "default": "ollama",
           "description": "Model provider.",
-          "order": 1
+          "order": 1,
+          "scope": "application"
         },
         "gbsAgent.model": {
           "type": "string",
           "default": "deepseek-v4-flash:cloud",
           "description": "Model used by the main agent.",
-          "order": 2
+          "order": 2,
+          "scope": "application"
         },
         "gbsAgent.subagentModel": {
           "type": "string",
           "default": "",
           "markdownDescription": "Optional cheaper/faster model for subagents (codebase exploration). Leave empty to use `#gbsAgent.model#`. A small model here saves a lot of usage.",
-          "order": 3
+          "order": 3,
+          "scope": "application"
         },
         "gbsAgent.permissionMode": {
           "type": "string",
@@ -125,29 +133,35 @@
             "Never ask (use with care)"
           ],
           "default": "acceptEdits",
-          "description": "When the agent must ask for approval.",
-          "order": 4
+          "order": 4,
+          "scope": "application",
+          "markdownDescription": "When the agent must ask for approval. Only read from user settings, so a repository cannot change it. Sensitive files (editor/git/CI config, scripts, credentials) always need approval unless this is `auto`."
         },
         "gbsAgent.ollama.baseUrl": {
           "type": "string",
           "default": "http://localhost:11434",
-          "description": "Ollama server URL."
+          "description": "Ollama server URL.",
+          "scope": "machine"
         },
         "gbsAgent.openai.baseUrl": {
           "type": "string",
           "default": "https://router.huggingface.co/v1",
-          "description": "Base URL of the OpenAI-compatible API (without /chat/completions)."
+          "description": "Base URL of the OpenAI-compatible API (without /chat/completions).",
+          "scope": "machine"
         },
         "gbsAgent.openai.apiKey": {
           "type": "string",
           "default": "",
-          "markdownDescription": "API key for the OpenAI-compatible endpoint. Prefer the **GBS Agent: Set API Key** command, which stores it in secret storage."
+          "scope": "machine",
+          "markdownDeprecationMessage": "Stored in plain text. Use the **GBS Agent: Set API Key** command, which keeps the key in secret storage and binds it to the endpoint.",
+          "description": "Legacy: API key in plain text. Prefer the 'GBS Agent: Set API Key' command."
         },
         "gbsAgent.huggingfaceToken": {
           "type": "string",
           "default": "",
           "deprecationMessage": "Use the 'GBS Agent: Set API Key' command instead.",
-          "description": "Legacy: Hugging Face token (used as the API key when no other key is set)."
+          "description": "Legacy: Hugging Face token (used as the API key when no other key is set).",
+          "scope": "machine"
         },
         "gbsAgent.contextWindow": {
           "type": "number",
@@ -190,7 +204,8 @@
         "gbsAgent.shell": {
           "type": "string",
           "default": "",
-          "description": "Shell used for commands (empty = cmd.exe on Windows, $SHELL elsewhere). Example: C:\\Program Files\\Git\\bin\\bash.exe"
+          "description": "Shell used for commands (empty = cmd.exe on Windows, $SHELL elsewhere). Example: C:\\Program Files\\Git\\bin\\bash.exe",
+          "scope": "machine"
         }
       }
     }
@@ -215,10 +230,18 @@
     "@types/vscode": "^1.120.0",
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "3.9.2",
     "esbuild": "^0.27.3",
     "eslint": "^9.39.3",
     "npm-run-all": "^4.1.5",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.56.1"
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "GBS Agent reads, edits and runs code in the workspace, so it is disabled until you trust the folder."
+    },
+    "virtualWorkspaces": false
   }
 }

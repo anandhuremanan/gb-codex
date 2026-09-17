@@ -274,11 +274,21 @@ export class Agent {
       return fail(`Missing required parameter(s) for ${call.name}: ${missing.join(", ")}.`);
     }
 
-    const permission = tool.permission?.(args as never);
-    if (permission && host.permissions.needsApproval(permission.kind, permission.detail, host.config.permissionMode)) {
+    let permission;
+    try {
+      permission = tool.permission?.(args as never);
+    } catch (err) {
+      return fail(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (permission && host.permissions.needsApproval(permission, host.config.permissionMode)) {
       host.updateItem(itemId, {
         status: "awaiting",
-        approval: { ...permission, alwaysLabel: host.permissions.describeAlways(permission.kind, permission.detail) },
+        approval: {
+          kind: permission.kind,
+          detail: permission.detail,
+          preview: permission.preview,
+          alwaysLabel: host.permissions.describeAlways(permission),
+        },
       });
       if (this.isMain) {
         host.setActivity("Waiting for your approval…");
@@ -292,7 +302,7 @@ export class Agent {
         );
       }
       if (decision === "always") {
-        host.permissions.allowAlways(permission.kind, permission.detail);
+        host.permissions.allowAlways(permission);
       }
       host.updateItem(itemId, { status: "running", startedAt: Date.now() });
     }
