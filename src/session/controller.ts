@@ -10,7 +10,9 @@ import { compactIfNeeded, elidePreviousTurns, repairToolResults } from "../agent
 import { PermissionPolicy } from "../agent/permissions";
 import { getEnvironment, systemPromptFor } from "../agent/prompts";
 import { SnapshotStore } from "../agent/snapshots";
-import { toolSets } from "../agent/tools";
+import { toolsFor } from "../agent/tools";
+import { SkillRegistry, autoAttachHint, renderCatalog } from "../skills/registry";
+import { SkillMeta } from "../skills/types";
 import { SubagentRequest } from "../agent/tools/types";
 import { ChangedFile, Todo, ToolItem, TranscriptItem } from "../agent/transcript";
 import { lineDiffStats, relPath, resolvePath } from "../agent/workspace";
@@ -34,6 +36,7 @@ const FLUSH_MS = 40;
 const MAX_PARALLEL_SUBAGENTS = 4;
 const MAX_SUBAGENTS_PER_TURN = 12;
 const REMOTE_CONSENT_KEY = "gbsAgent.remoteConsent";
+const SKILL_CONSENT_KEY = "gbsAgent.skillsAllowed";
 const SAVE_DEBOUNCE_MS = 1500;
 
 function emptySession(): StoredSession {
@@ -61,6 +64,9 @@ export class SessionController implements AgentHost, vscode.Disposable {
   private runPromise?: Promise<void>;
   private turn?: TurnState & { subagents: number };
   private activeSubagents = 0;
+  private readonly skillRegistry = new SkillRegistry();
+  /** Skills for the run in progress; fixed for the whole run so the system prompt stays stable. */
+  private runSkills: SkillMeta[] = [];
   private readonly subagentWaiters: Array<() => void> = [];
   private activity = "";
   private queued: string[] = [];
@@ -144,6 +150,7 @@ export class SessionController implements AgentHost, vscode.Disposable {
       permissionMode: c.permissionMode,
       contextWindow: c.contextWindow,
       remote: remoteDestination(c, c.model),
+      skills: this.runSkills.map((s) => ({ name: s.name, description: s.description, source: s.source, origin: s.origin, warnings: s.warnings, valid: s.valid })),
     };
   }
 
@@ -217,6 +224,9 @@ export class SessionController implements AgentHost, vscode.Disposable {
         case "setConfig":
           await this.setConfig(msg.config ?? {});
           break;
+        case "reloadSkills":
+          await this.reloadSkills();
+          break;
         case "listModels":
           this.post({ type: "models", models: await this.listModels() });
           break;
@@ -246,10 +256,13 @@ export class SessionController implements AgentHost, vscode.Disposable {
         case "/compact":
           await this.compact();
           return;
+        case "/skills":
+          await this.showSkills();
+          return;
         case "/help":
           this.notice(
             "info",
-            "Commands: /new — start a new chat · /compact — summarize the conversation to free context · /help. Press Esc to stop a running agent.",
+            "Commands: /new — start a new chat · /compact — summarize the conversation to free context · /skills — list available skills · /help. Press Esc to stop a running agent.",
           );
           return;
       }
@@ -360,17 +373,26 @@ export class SessionController implements AgentHost, vscode.Disposable {
 
     try {
       const cfg = this.config;
+      await this.refreshSkills(true);
+      const hint = autoAttachHint(this.runSkills, this.activeFileRelPath());
+      if (hint) {
+        messages[messages.length - 1].content += hint;
+      }
       if (!(await this.confirmRemote(cfg.model))) {
         messages.pop();
         this.notice("warning", "Cancelled: the conversation was not sent to the remote model.");
         return;
       }
       const provider = this.createProvider("main");
+      const catalog = renderCatalog(this.runSkills, this.activeFileRelPath());
+      if (catalog.text) {
+        this.log(`[skills] ${this.runSkills.filter((s) => s.valid).length} available, catalog ~${catalog.approxTokens} tokens`);
+      }
       const agent = new Agent({
         kind: "main",
         provider,
-        tools: toolSets.main,
-        systemPrompt: await systemPromptFor("main", cfg.shell),
+        tools: toolsFor("main", () => this.runSkills),
+        systemPrompt: await systemPromptFor("main", cfg.shell, [catalog.text]),
         messages,
         host: this,
         signal: abort.signal,
@@ -502,6 +524,91 @@ export class SessionController implements AgentHost, vscode.Disposable {
     this.saveTimer = setTimeout(() => void this.persist(), SAVE_DEBOUNCE_MS);
   }
 
+
+  // ─── Skills ─────────────────────────────────────────────────────────────────
+
+  /** Folder holding skills that follow the user across projects. */
+  userSkillsDir(): vscode.Uri | undefined {
+    const configured = this.config.skillsPath;
+    if (configured) {
+      return vscode.Uri.file(configured.replace(/^~(?=[\\/])/, process.env.USERPROFILE || process.env.HOME || "~"));
+    }
+    return this.context.globalStorageUri ? vscode.Uri.joinPath(this.context.globalStorageUri, "skills") : undefined;
+  }
+
+  private activeFileRelPath(): string | undefined {
+    return this.editorContextInfo()?.path;
+  }
+
+  /**
+   * Loads the skill list for a run. Skills from the repository (or its dependencies) are
+   * instructions the agent will follow, so they are used only after the user allows them once.
+   */
+  private async refreshSkills(interactive: boolean): Promise<void> {
+    if (!this.config.skillsEnabled) {
+      this.runSkills = [];
+      return;
+    }
+    const userSkillsDir = this.userSkillsDir();
+    const state = this.context.workspaceState;
+    let allowed = state?.get<boolean>(SKILL_CONSENT_KEY);
+
+    if (allowed === undefined && interactive) {
+      const candidates = await this.skillRegistry.list({ userSkillsDir: undefined, projectSkillsAllowed: true });
+      const fromRepo = candidates.filter((s) => s.source !== "user" && s.valid);
+      if (fromRepo.length) {
+        const use = "Use them";
+        const skip = "Not now";
+        const names = fromRepo.slice(0, 8).map((s) => `${s.name} (${s.origin})`).join("\n");
+        const choice = await vscode.window.showWarningMessage(
+          `This workspace provides ${fromRepo.length} agent skill(s). Use them?`,
+          {
+            modal: true,
+            detail: `Skills are instructions the agent follows, supplied by the repository or its dependencies:\n\n${names}\n\nOnly allow them if you trust this project. You can change this later with "GBS Agent: Reload Skills".`,
+          },
+          use,
+          skip,
+        );
+        allowed = choice === use;
+        await state?.update(SKILL_CONSENT_KEY, allowed);
+      }
+    }
+
+    this.runSkills = await this.skillRegistry.list({ userSkillsDir, projectSkillsAllowed: allowed === true });
+    const broken = this.runSkills.filter((s) => !s.valid);
+    if (broken.length) {
+      this.log(`[skills] ignoring ${broken.length} invalid skill(s): ${broken.map((s) => s.name).join(", ")}`);
+    }
+    this.post({ type: "config", config: this.uiConfig() });
+  }
+
+  /** Re-reads skills from disk and asks again about repository skills. */
+  async reloadSkills(): Promise<void> {
+    await this.context.workspaceState?.update(SKILL_CONSENT_KEY, undefined);
+    this.skillRegistry.invalidate();
+    await this.refreshSkills(true);
+    const usable = this.runSkills.filter((s) => s.valid).length;
+    this.notice("info", usable ? `Reloaded skills: ${usable} available.` : "Reloaded skills: none found.");
+  }
+
+  private async showSkills(): Promise<void> {
+    await this.refreshSkills(true);
+    if (!this.runSkills.length) {
+      const dir = this.userSkillsDir();
+      this.notice(
+        "info",
+        `No skills found. Add one as \`.gbs/skills/<name>/SKILL.md\` in this project${dir ? ", or in your personal skills folder (command: GBS Agent: Open Skills Folder)" : ""}. Use "GBS Agent: New Skill" to scaffold one.`,
+      );
+      return;
+    }
+    const catalog = renderCatalog(this.runSkills, this.activeFileRelPath());
+    const lines = this.runSkills.map((s) => {
+      const problems = s.warnings.length ? ` — ${s.warnings.join(" ")}` : "";
+      return `- \`${s.name}\` (${s.origin})${s.valid ? "" : " [ignored]"}${problems}\n  ${s.description || "(no description)"}`;
+    });
+    this.notice("info", `Skills available (catalog costs ~${catalog.approxTokens} tokens per request):\n${lines.join("\n")}`);
+  }
+
   // ─── AgentHost ──────────────────────────────────────────────────────────────
 
   createProvider(kind: "main" | "subagent"): LlmProvider {
@@ -592,7 +699,7 @@ export class SessionController implements AgentHost, vscode.Disposable {
     const agent = new Agent({
       kind: request.type,
       provider: this.createProvider("subagent"),
-      tools: toolSets[request.type],
+      tools: toolsFor(request.type, () => this.runSkills),
       systemPrompt: await systemPromptFor(request.type, cfg.shell),
       messages,
       host: this,

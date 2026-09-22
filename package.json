@@ -13,7 +13,7 @@
     "type": "git",
     "url": "https://github.com/anandhuremanan/gb-codex"
   },
-  "version": "0.0.9",
+  "version": "0.0.10",
   "engines": {
     "vscode": "^1.120.0"
   },
@@ -46,6 +46,21 @@
       {
         "command": "gbsAgent.clearHistory",
         "title": "Clear Chat History",
+        "category": "GBS Agent"
+      },
+      {
+        "command": "gbsAgent.newSkill",
+        "title": "New Skill",
+        "category": "GBS Agent"
+      },
+      {
+        "command": "gbsAgent.openSkillsFolder",
+        "title": "Open Skills Folder",
+        "category": "GBS Agent"
+      },
+      {
+        "command": "gbsAgent.reloadSkills",
+        "title": "Reload Skills",
         "category": "GBS Agent"
       },
       {
@@ -206,6 +221,19 @@
           "default": "",
           "description": "Shell used for commands (empty = cmd.exe on Windows, $SHELL elsewhere). Example: C:\\Program Files\\Git\\bin\\bash.exe",
           "scope": "machine"
+        },
+        "gbsAgent.skills.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Enable agent skills: folders with a `SKILL.md` that the agent loads when relevant. Only the name and description of each skill are always in the prompt; the instructions load on demand.",
+          "order": 5
+        },
+        "gbsAgent.skillsPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Folder holding your personal/company skills, available in every project (one sub-folder per skill). Leave empty to use the extension's own folder (command: **GBS Agent: Open Skills Folder**).",
+          "order": 6
         }
       }
     }

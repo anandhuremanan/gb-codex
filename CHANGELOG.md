@@ -4,6 +4,16 @@ All notable changes to the "gbs-local-dev" extension will be documented in this 
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.0.10] - 2026-09-22
+
+### Added
+- **Agent skills.** Folders with a `SKILL.md` that teach the agent project- or team-specific knowledge (a component library, a service's conventions, a project's domain rules). Only each skill's name and description are always in the prompt (~45 tokens each); the instructions load when the agent decides they apply, and bundled reference files load only when opened.
+  - Skills are read from `.gbs/skills/` and `.claude/skills/` in the project, from dependencies that declare `"gbsSkills"` in their package.json, and from a personal folder shared across projects.
+  - `autoAttach` globs mark a skill relevant to the file you have open, which helps smaller local models pick the right one.
+  - New commands: **New Skill**, **Open Skills Folder**, **Reload Skills**; `/skills` in the chat; a skills chip under the input.
+  - Skills from a repository or dependency are used only after a one-time confirmation per workspace, and are labelled as repository-provided when given to the model.
+  - With no skills present, prompts and tool schemas are unchanged from before this release.
+
 ## [0.0.9] - 2026-09-17
 
 ### Security

@@ -122,7 +122,12 @@ export function getEnvironment(shell: string, refresh = false): Promise<string> 
   return environmentCache.text;
 }
 
-export async function systemPromptFor(kind: "main" | "explore" | "general", shell: string): Promise<string> {
+export async function systemPromptFor(
+  kind: "main" | "explore" | "general",
+  shell: string,
+  extraSections: string[] = [],
+): Promise<string> {
   const base = kind === "main" ? MAIN_PROMPT : kind === "explore" ? EXPLORE_PROMPT : GENERAL_PROMPT;
-  return `${base}\n\n${await getEnvironment(shell)}`;
+  const sections = [base, await getEnvironment(shell), ...extraSections.filter((s) => s.trim())];
+  return sections.join("\n\n");
 }

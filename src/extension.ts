@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { promptForApiKey, readConfig } from "./config";
 import { SnapshotStore } from "./agent/snapshots";
 import { SessionController } from "./session/controller";
+import { createSkill, openSkillsFolder } from "./skills/authoring";
 import { SessionStore } from "./session/store";
 import { ChatViewProvider } from "./ui/chatViewProvider";
 
@@ -33,6 +34,12 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }),
     vscode.commands.registerCommand("gbsAgent.showLogs", () => output.show()),
+    vscode.commands.registerCommand("gbsAgent.reloadSkills", () => controller.reloadSkills()),
+    vscode.commands.registerCommand("gbsAgent.openSkillsFolder", () => openSkillsFolder(controller.userSkillsDir())),
+    vscode.commands.registerCommand("gbsAgent.newSkill", async () => {
+      await createSkill(controller.userSkillsDir());
+      await controller.reloadSkills();
+    }),
   );
 }
 

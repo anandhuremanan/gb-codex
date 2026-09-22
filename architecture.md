@@ -72,6 +72,30 @@ Read-only tools (and explore subagents) run in parallel when the model batches t
 - **Diagnostics instead of builds.** After edits, the agent gets language-server errors for the changed files. It no longer runs a full build after every step. The model runs build/test commands only when warranted.
 - **No heuristic nagging.** Context is no longer thrown away, so the old anti-loop warnings (which were themselves appended to every prompt) are gone. A single note is added only when the exact same call repeats three times.
 
+## Skills
+
+Skills are folders with a `SKILL.md` (YAML front matter plus markdown), loaded in three stages so they cost almost nothing until used:
+
+| Level | What | When it reaches the model | Cost |
+|---|---|---|---|
+| 1 | `name` + `description` | Always, as a `# Skills` block in the system prompt | ~45 tokens per skill |
+| 2 | `SKILL.md` body | When the model calls `skill(name)` | Capped at ~1.5k tokens |
+| 3 | Bundled files | When the model calls `skill(name, resource)` | Only what it opens |
+
+- `src/skills/frontmatter.ts` parses the front matter (no YAML dependency) and matches `autoAttach` globs.
+- `src/skills/registry.ts` discovers skills in `.gbs/skills`, `.claude/skills`, dependencies that declare `gbsSkills`, and the user folder; it caches per run so the system prompt stays byte-identical, and renders the catalog (capped at 12 entries, skills matching the open file first).
+- `src/agent/tools/skill.ts` serves levels 2 and 3, resolving resource paths inside the skill folder (with symlink checks) so user-level skills outside the workspace don't widen the file sandbox.
+- `src/skills/authoring.ts` scaffolds new skills.
+
+Design rules that keep this from costing anything when unused:
+- **No skills, no change.** With no usable skills the catalog is empty and the `skill` tool is not registered, so prompts and tool schemas are byte-identical to a build without the feature (`toolsFor` in `src/agent/tools/index.ts`).
+- **Fixed per run.** The skill list is resolved once per run, so the cached prefix survives every step.
+- **Loaded once.** A second `skill` call for the same name returns a stub instead of the body again.
+- **Subagents get no catalog**, only the tool, so delegation doesn't repeat the cost.
+- **Deterministic hints.** `autoAttach` adds one line (~15 tokens) naming relevant skills for the open file, which matters for small local models that are less reliable at picking from descriptions.
+
+Trust: skills from the repository or its dependencies are instructions, so they are used only after a one-time per-workspace confirmation, are labelled as repository-provided when handed to the model, and `.gbs/` is in `SENSITIVE_WRITE` so the agent cannot quietly write its own.
+
 ## Permissions
 
 `gbsAgent.permissionMode` (switchable from the composer):

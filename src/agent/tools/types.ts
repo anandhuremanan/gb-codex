@@ -14,6 +14,8 @@ export interface ToolResult {
 export interface ToolState {
   /** fsPath -> version token observed when the agent last read or wrote the file. */
   readVersions: Map<string, string>;
+  /** Skills (and skill resources) already loaded in this agent's context. */
+  loadedSkills?: Set<string>;
 }
 
 export interface SubagentRequest {

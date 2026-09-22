@@ -31,6 +31,7 @@
     wand: '<path d="M2 14l8-8M9 2v2M13 6h-2M12 3l-1.5 1.5"/>',
     bug: '<rect x="4.5" y="5" width="7" height="8.5" rx="3.5"/><path d="M8 5V3M2 9h2.5M11.5 9H14M3 5.5l1.8 1.3M13 5.5l-1.8 1.3M3 13l1.8-1.3M13 13l-1.8-1.3"/>',
     beaker: '<path d="M6 1.5v5L2.5 13a1 1 0 0 0 .9 1.5h9.2a1 1 0 0 0 .9-1.5L10 6.5v-5M5 1.5h6"/>',
+    book: '<path d="M2.5 3.5A1.5 1.5 0 0 1 4 2h8.5v10.5H4A1.5 1.5 0 0 0 2.5 14z"/><path d="M2.5 12.5A1.5 1.5 0 0 1 4 11h8.5"/>',
   };
   const icon = (name) => `<svg viewBox="0 0 16 16" aria-hidden="true">${ICONS[name] || ""}</svg>`;
 
@@ -44,6 +45,7 @@
     run_command: "Run",
     todo_write: "Plan",
     task: "Agent",
+    skill: "Skill",
   };
 
   const MODE_LABELS = { ask: "Ask first", acceptEdits: "Auto-edit", auto: "Full auto" };
@@ -57,6 +59,7 @@
   const SLASH_COMMANDS = [
     { cmd: "/new", desc: "Start a new chat" },
     { cmd: "/compact", desc: "Summarize the conversation to free context" },
+    { cmd: "/skills", desc: "List the skills available in this project" },
     { cmd: "/help", desc: "Show available commands" },
   ];
 
@@ -316,6 +319,7 @@
         <div class="composer-bar">
           <button class="chip" id="model-chip" title="Model">${icon("cpu")}<span class="label" id="model-label"></span></button>
           <button class="chip" id="mode-chip">${icon("shield")}<span class="label" id="mode-label"></span></button>
+          <button class="chip" id="skills-chip" hidden>${icon("book")}<span class="label" id="skills-label"></span></button>
           <span class="spacer"></span>
           <span class="meter" id="meter" title=""><span class="ring" id="meter-ring"></span><span id="meter-text"></span></span>
           <button class="send" id="send" title="Send (Enter)">${icon("send")}</button>
@@ -337,6 +341,7 @@
           <button class="btn primary" id="apply-btn">Apply</button>
         </div>
       </div>
+      <div class="popover" id="skills-pop" hidden></div>
       <div class="slash-menu" id="slash" hidden></div>
     </div>`;
 
@@ -365,6 +370,9 @@
     subInput: /** @type {HTMLInputElement} */ ($("#sub-input")),
     modelList: $("#model-list"),
     slash: $("#slash"),
+    skillsChip: $("#skills-chip"),
+    skillsLabel: $("#skills-label"),
+    skillsPop: $("#skills-pop"),
   };
 
   els.input.value = persisted.draft || "";
@@ -750,7 +758,45 @@
     els.modeLabel.textContent = MODE_LABELS[c.permissionMode] || c.permissionMode;
     els.modeChip.title = `${MODE_TITLES[c.permissionMode] || ""} — click to change`;
     els.modeChip.classList.toggle("mode-auto", c.permissionMode === "auto");
+    renderSkills();
     renderMeter();
+  }
+
+  function renderSkills() {
+    const skills = state.config.skills || [];
+    const usable = skills.filter((s) => s.valid);
+    els.skillsChip.hidden = skills.length === 0;
+    if (!skills.length) {
+      els.skillsPop.hidden = true;
+      return;
+    }
+    els.skillsLabel.textContent = `${usable.length} skill${usable.length === 1 ? "" : "s"}`;
+    els.skillsChip.title = usable.length
+      ? `Loaded on demand: ${usable.map((s) => s.name).join(", ")}`
+      : "Skills found but not usable — click for details";
+    if (!els.skillsPop.hidden) {
+      paintSkillsPopover();
+    }
+  }
+
+  function paintSkillsPopover() {
+    const skills = state.config.skills || [];
+    els.skillsPop.innerHTML = `
+      <div class="field"><label>Skills the agent can load</label>
+        <div class="skill-list">${skills
+          .map(
+            (s) => `<div class="skill${s.valid ? "" : " invalid"}">
+              <div class="skill-head"><span class="skill-name">${esc(s.name)}</span><span class="badge">${esc(s.source)}</span></div>
+              <div class="skill-desc">${esc(s.description || "(no description)")}</div>
+              ${s.warnings && s.warnings.length ? `<div class="skill-warn">${esc(s.warnings.join(" "))}</div>` : ""}
+            </div>`,
+          )
+          .join("")}</div>
+      </div>
+      <div class="pop-actions">
+        <button class="btn" data-skill-action="reload">Reload</button>
+        <button class="btn" data-skill-action="docs">How skills work</button>
+      </div>`;
   }
 
   function renderMeter() {
@@ -1061,6 +1107,14 @@
   $("#refresh-btn").addEventListener("click", () => vscode.postMessage({ type: "listModels" }));
   $("#settings-btn").addEventListener("click", () => vscode.postMessage({ type: "openSettings" }));
 
+  els.skillsChip.addEventListener("click", (e) => {
+    e.stopPropagation();
+    els.skillsPop.hidden = !els.skillsPop.hidden;
+    if (!els.skillsPop.hidden) {
+      paintSkillsPopover();
+    }
+  });
+
   els.modeChip.addEventListener("click", () => {
     const next = MODE_ORDER[(MODE_ORDER.indexOf(state.config.permissionMode) + 1) % MODE_ORDER.length];
     state.config = { ...state.config, permissionMode: next };
@@ -1076,6 +1130,21 @@
     }
     if (!target.closest("#model-pop") && !target.closest("#model-chip")) {
       els.modelPop.hidden = true;
+    }
+    if (!target.closest("#skills-pop") && !target.closest("#skills-chip")) {
+      els.skillsPop.hidden = true;
+    }
+
+    const skillAction = target.closest("[data-skill-action]");
+    if (skillAction) {
+      const action = /** @type {HTMLElement} */ (skillAction).dataset.skillAction;
+      els.skillsPop.hidden = true;
+      if (action === "reload") {
+        vscode.postMessage({ type: "reloadSkills" });
+      } else {
+        send("/skills");
+      }
+      return;
     }
 
     const approve = target.closest("[data-approve]");

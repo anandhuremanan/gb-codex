@@ -51,7 +51,7 @@ const MAX_CONTINUATIONS = 2;
 const TOOL_OUTPUT_PREVIEW = 8000;
 
 export class Agent {
-  private readonly state: ToolState = { readVersions: new Map() };
+  private readonly state: ToolState = { readVersions: new Map(), loadedSkills: new Set() };
   private readonly toolMap: Map<string, Tool>;
   private readonly specs: ToolSpec[];
   private readonly repeatCounts = new Map<string, number>();

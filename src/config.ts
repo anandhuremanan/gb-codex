@@ -17,6 +17,8 @@ export interface AgentConfig {
   commandTimeoutSeconds: number;
   maxToolOutputChars: number;
   shell: string;
+  skillsEnabled: boolean;
+  skillsPath: string;
 }
 
 const SECTION = "gbsAgent";
@@ -36,6 +38,7 @@ export const PROTECTED_SETTINGS = new Set([
   "huggingfaceToken",
   "permissionMode",
   "shell",
+  "skillsPath",
 ]);
 
 function setting<T>(key: string, fallback: T): T {
@@ -63,6 +66,8 @@ export function readConfig(): AgentConfig {
     commandTimeoutSeconds: Math.max(5, setting<number>("commandTimeoutSeconds", 120)),
     maxToolOutputChars: Math.max(2000, setting<number>("maxToolOutputChars", 20000)),
     shell: setting<string>("shell", "").trim(),
+    skillsEnabled: setting<boolean>("skills.enabled", true),
+    skillsPath: setting<string>("skillsPath", "").trim(),
   };
 }
 

@@ -1460,6 +1460,50 @@ textarea::placeholder {
   flex-wrap: wrap;
 }
 
+.skill-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.skill {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.skill.invalid {
+  opacity: 0.6;
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--border));
+}
+
+.skill-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.skill-name {
+  font-family: var(--mono);
+  font-weight: 600;
+}
+
+.skill-desc {
+  color: var(--muted);
+  font-size: 0.9em;
+  line-height: 1.4;
+  margin-top: 2px;
+}
+
+.skill-warn {
+  color: var(--warn);
+  font-size: 0.85em;
+  margin-top: 4px;
+}
+
 .slash-menu {
   position: absolute;
   left: 10px;
