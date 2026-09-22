@@ -4,6 +4,12 @@ All notable changes to the "gbs-local-dev" extension will be documented in this 
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.0.11] - 2026-09-22
+
+### Changed
+- New identity: an abstract mark of three strokes spiralling outward, in GramPro's orange-to-red gradient. It replaces the generic sparkle and the built-in `$(robot)` codicon, and is used for the Marketplace icon, the activity bar, the chat panel and the product page, so the extension is recognisable beside other agents and clearly belongs to GramPro.
+- The product page (`docs/`) now uses the GramPro palette throughout. Interactive colours are deepened so button text and links meet WCAG AA contrast.
+
 ## [0.0.10] - 2026-09-22
 
 ### Added
@@ -13,9 +19,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   - New commands: **New Skill**, **Open Skills Folder**, **Reload Skills**; `/skills` in the chat; a skills chip under the input.
   - Skills from a repository or dependency are used only after a one-time confirmation per workspace, and are labelled as repository-provided when given to the model.
   - With no skills present, prompts and tool schemas are unchanged from before this release.
-
-### Changed
-- New identity: an abstract mark of three strokes spiralling outward, in GramPro's orange-to-red gradient. It replaces the generic sparkle and the built-in `$(robot)` codicon, and is used for the Marketplace icon, the activity bar, the chat panel and the product page, so the extension is recognisable beside other agents and clearly belongs to GramPro.
 
 ## [0.0.9] - 2026-09-17
 
