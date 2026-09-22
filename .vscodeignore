@@ -16,3 +16,4 @@ vsc-extension-quickstart.md
 architecture.md
 package-lock.json
 .claude/**
+docs/**

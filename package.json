@@ -6,7 +6,7 @@
   "icon": "assets/icon.png",
   "license": "MIT",
   "galleryBanner": {
-    "color": "#0f172a",
+    "color": "#1a1d23",
     "theme": "dark"
   },
   "repository": {
@@ -89,14 +89,14 @@
         {
           "id": "gbs-dev-panel",
           "title": "GBS Agent",
-          "icon": "$(robot)"
+          "icon": "assets/icon.svg"
         }
       ]
     },
     "views": {
       "gbs-dev-panel": [
         {
-          "icon": "$(robot)",
+          "icon": "assets/icon.svg",
           "type": "webview",
           "id": "gbs-local-dev.chatView",
           "name": "Chat"

@@ -14,6 +14,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   - Skills from a repository or dependency are used only after a one-time confirmation per workspace, and are labelled as repository-provided when given to the model.
   - With no skills present, prompts and tool schemas are unchanged from before this release.
 
+### Changed
+- New identity: an abstract mark of three strokes spiralling outward, in GramPro's orange-to-red gradient. It replaces the generic sparkle and the built-in `$(robot)` codicon, and is used for the Marketplace icon, the activity bar, the chat panel and the product page, so the extension is recognisable beside other agents and clearly belongs to GramPro.
+
 ## [0.0.9] - 2026-09-17
 
 ### Security

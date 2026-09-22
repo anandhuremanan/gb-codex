@@ -247,14 +247,21 @@ svg {
   border-radius: 12px;
   display: grid;
   place-items: center;
-  color: var(--accent-fg);
-  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, var(--link)));
-  box-shadow: 0 6px 20px color-mix(in srgb, var(--accent) 35%, transparent);
+  /* Brand colours, not theme colours: this tile is the product mark. */
+  color: #fff;
+  background: linear-gradient(135deg, #f7a01e, #ef4b23 55%, #e12e39);
+  box-shadow: 0 6px 20px rgba(239, 75, 35, 0.35);
 }
 
 .welcome .logo svg {
   width: 24px;
   height: 24px;
+}
+
+/* The brand mark mixes a stroked chevron with a solid cursor. */
+.welcome .logo svg .solid {
+  fill: currentColor;
+  stroke: none;
 }
 
 .welcome h2 {
