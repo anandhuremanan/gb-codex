@@ -165,8 +165,8 @@ a:hover {
   z-index: 20;
   display: flex;
   align-items: center;
-  gap: 20px;
-  padding: 12px 24px;
+  gap: clamp(12px, 3vw, 20px);
+  padding: 10px clamp(14px, 4vw, 24px);
   background: color-mix(in srgb, var(--bg) 72%, transparent);
   backdrop-filter: saturate(160%) blur(14px);
   -webkit-backdrop-filter: saturate(160%) blur(14px);
@@ -280,11 +280,11 @@ a:hover {
 main {
   max-width: var(--w);
   margin: 0 auto;
-  padding: 0 24px 40px;
+  padding: 0 clamp(16px, 4vw, 24px) 40px;
 }
 
 section {
-  margin: 72px 0;
+  margin: clamp(44px, 9vw, 72px) 0;
 }
 
 h1 {
@@ -314,13 +314,21 @@ p {
   margin: 0 0 14px;
 }
 
+/* Grid children default to min-width:auto, so one long unbreakable token (a clone
+   URL, a package id) can stop a column shrinking and push the whole page wider. */
+.hero > *,
+.source > *,
+.cols > * {
+  min-width: 0;
+}
+
 /* ── Hero ────────────────────────────────────────────────── */
 .hero {
   display: grid;
   grid-template-columns: 1.02fr 0.98fr;
   align-items: center;
   gap: 44px;
-  margin: 72px 0 84px;
+  margin: clamp(36px, 7vw, 72px) 0 clamp(48px, 8vw, 84px);
 }
 
 .pill {
@@ -575,7 +583,8 @@ p {
 /* ── Features ────────────────────────────────────────────── */
 .features {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
+  /* Explicit 2x2: auto-fit gave a 3+1 orphan row between 768px and 1099px. */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
 }
 
@@ -658,7 +667,7 @@ code {
 
 pre {
   margin: 0 0 16px;
-  padding: 16px 18px;
+  padding: clamp(12px, 3vw, 18px);
   overflow-x: auto;
   background: color-mix(in srgb, var(--code-bg) 88%, transparent);
   border: 1px solid var(--border);
@@ -670,7 +679,7 @@ pre {
 pre code {
   padding: 0;
   background: none;
-  font-size: 0.87rem;
+  font-size: clamp(0.78rem, 2.7vw, 0.87rem);
 }
 
 pre .c {
@@ -689,6 +698,8 @@ kbd {
 
 .table {
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   margin-bottom: 16px;
@@ -697,6 +708,8 @@ kbd {
 
 table {
   width: 100%;
+  /* Below this the three columns crush together; the wrapper scrolls instead. */
+  min-width: 480px;
   border-collapse: collapse;
   font-size: 0.91rem;
 }
@@ -794,7 +807,7 @@ td:last-child code {
 }
 
 .cta {
-  padding: 52px 28px;
+  padding: clamp(34px, 6vw, 52px) clamp(20px, 4vw, 28px);
   text-align: center;
   border: 1px solid var(--border);
   border-radius: 20px;
@@ -825,7 +838,7 @@ footer {
   justify-content: space-between;
   max-width: var(--w);
   margin: 0 auto;
-  padding: 24px 24px 44px;
+  padding: 24px clamp(16px, 4vw, 24px) 44px;
   border-top: 1px solid var(--border);
   color: var(--muted);
   font-size: 0.9rem;
@@ -837,33 +850,139 @@ footer nav {
 }
 
 /* ── Responsive ──────────────────────────────────────────── */
-@media (max-width: 860px) {
+/* ── Responsive ──────────────────────────────────────────── */
+
+/* Tablet and below: one column, and the hero mock sits under the copy. */
+@media (max-width: 959px) {
   .hero,
   .source {
     grid-template-columns: 1fr;
   }
 
   .hero {
-    gap: 34px;
-    margin: 48px 0 64px;
+    gap: 30px;
+  }
+
+  .panel {
+    max-width: 560px;
   }
 }
 
-@media (max-width: 640px) {
+/* The nav becomes a scrollable second row rather than disappearing. */
+@media (max-width: 720px) {
+  .topbar {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
   .topbar nav {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+    gap: 16px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+
+  .topbar nav::-webkit-scrollbar {
     display: none;
   }
 
-  section {
-    margin: 52px 0;
+  .topbar nav a {
+    white-space: nowrap;
+  }
+
+  /* The Install button beside it already covers this link. */
+  .topbar nav a[href="#install"] {
+    display: none;
+  }
+
+  .brand {
+    margin-right: auto;
+  }
+
+  /* The header is two rows here, so anchors must clear more of it. */
+  html {
+    scroll-padding-top: 104px;
+  }
+}
+
+@media (max-width: 639px) {
+  .features {
+    grid-template-columns: 1fr;
+  }
+
+  /* Stack each row into a block so the model table never needs sideways scrolling. */
+  table {
+    min-width: 0;
+  }
+
+  thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  tr {
+    display: block;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  tr:last-child {
+    border-bottom: none;
+  }
+
+  td {
+    display: block;
+    padding: 2px 0;
+    border: none;
+  }
+
+  td:first-child {
+    font-weight: 650;
   }
 
   .source {
     padding: 24px 20px;
   }
 
-  .cta {
-    padding: 40px 20px;
+  .cols {
+    gap: 20px;
+  }
+}
+
+/* Phones: full-width actions for comfortable tap targets, tighter mock panel. */
+@media (max-width: 479px) {
+  .actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .actions .button {
+    justify-content: center;
+  }
+
+  .panel-body {
+    gap: 8px;
+    padding: 14px 12px 16px;
+    font-size: 0.8rem;
+  }
+
+  .bubble {
+    max-width: 94%;
+  }
+
+  .lede {
+    font-size: 1.04rem;
+  }
+
+  blockquote {
+    padding: 12px 14px;
   }
 }
 
