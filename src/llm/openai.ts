@@ -1,4 +1,4 @@
-import { HttpError, postJson, readLines } from "./http";
+import { HttpError, RetryOptions, postJson, readLines } from "./http";
 import { ChatRequest, ChatResult, LlmMessage, LlmProvider, StreamCallbacks, newId } from "./types";
 import { parseArguments } from "./textToolCalls";
 
@@ -8,6 +8,8 @@ export interface OpenAIOptions {
   maxOutputTokens: number;
   temperature: number;
   getApiKey(): Promise<string | undefined>;
+  /** Notified while waiting out a busy or rate-limited endpoint. */
+  onRetry?: RetryOptions["onRetry"];
 }
 
 /**
@@ -47,13 +49,13 @@ export class OpenAICompatibleProvider implements LlmProvider {
       if (this.supportsUsageOption) {
         body.stream_options = { include_usage: true };
       }
-      response = await postJson(url, body, headers, request.signal, "Model server");
+      response = await postJson(url, body, headers, request.signal, "Model server", { onRetry: this.options.onRetry });
     } catch (err) {
       // Some servers reject the stream_options field; retry once without it.
       if (err instanceof HttpError && err.status === 400 && /stream_options/i.test(err.body)) {
         this.supportsUsageOption = false;
         delete body.stream_options;
-        response = await postJson(url, body, headers, request.signal, "Model server");
+        response = await postJson(url, body, headers, request.signal, "Model server", { onRetry: this.options.onRetry });
       } else {
         throw err;
       }

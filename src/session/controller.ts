@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { AgentConfig, getApiKey, readConfig, remoteDestination, updateConfig } from "../config";
 import { AdaptiveProvider } from "../llm/adaptiveProvider";
-import { CancelledError, isAbortError } from "../llm/http";
+import { CancelledError, RetryInfo, isAbortError } from "../llm/http";
 import { OllamaProvider } from "../llm/ollama";
 import { OpenAICompatibleProvider } from "../llm/openai";
 import { LlmProvider, Usage, newId } from "../llm/types";
@@ -617,6 +617,7 @@ export class SessionController implements AgentHost, vscode.Disposable {
     if (!model) {
       throw new Error("No model configured. Pick a model from the model menu below the chat input.");
     }
+    const onRetry = (info: RetryInfo) => this.reportRetry(info);
     const inner =
       cfg.provider === "openai"
         ? new OpenAICompatibleProvider({
@@ -625,6 +626,7 @@ export class SessionController implements AgentHost, vscode.Disposable {
             maxOutputTokens: cfg.maxOutputTokens,
             temperature: cfg.temperature,
             getApiKey: () => getApiKey(this.context.secrets, cfg.openaiBaseUrl, true),
+            onRetry,
           })
         : new OllamaProvider({
             baseUrl: cfg.ollamaBaseUrl,
@@ -632,8 +634,17 @@ export class SessionController implements AgentHost, vscode.Disposable {
             contextWindow: cfg.contextWindow,
             maxOutputTokens: cfg.maxOutputTokens,
             temperature: cfg.temperature,
+            onRetry,
           });
     return new AdaptiveProvider(inner, (m) => this.log(m));
+  }
+
+  /** Tells the user the endpoint is busy rather than letting the wait look like a hang. */
+  private reportRetry(info: RetryInfo): void {
+    const seconds = Math.max(1, Math.round(info.delayMs / 1000));
+    const reason = info.status === 429 ? "busy or rate limiting" : `returning HTTP ${info.status}`;
+    this.setActivity(`${info.service} is ${reason} — retrying in ${seconds}s (${info.attempt}/${info.maxRetries})`);
+    this.log(`[retry] HTTP ${info.status} from ${info.service}; attempt ${info.attempt}/${info.maxRetries} in ${info.delayMs}ms`);
   }
 
   /**
@@ -1012,6 +1023,12 @@ function friendlyError(message: string, cfg: AgentConfig): string {
   }
   if (/HTTP 401|HTTP 403/.test(message)) {
     return `${message}\n\nCheck your API key (command: "GBS Agent: Set API Key").`;
+  }
+  if (/HTTP 429/.test(message)) {
+    return `${message}\n\nThe endpoint is rate limiting or its provider is overloaded, and the retries did not clear it. Wait a moment and resend, pick another model, or switch to a local model.`;
+  }
+  if (/HTTP 50[0234]/.test(message)) {
+    return `${message}\n\nThe model server is failing or overloaded. Resend in a moment, or switch to another endpoint.`;
   }
   return message;
 }

@@ -1,4 +1,4 @@
-import { postJson, readLines } from "./http";
+import { RetryOptions, postJson, readLines } from "./http";
 import { ChatRequest, ChatResult, LlmMessage, LlmProvider, StreamCallbacks, ToolCall, newId } from "./types";
 import { parseArguments } from "./textToolCalls";
 
@@ -8,6 +8,8 @@ export interface OllamaOptions {
   contextWindow: number;
   maxOutputTokens: number;
   temperature: number;
+  /** Notified while waiting out a busy or rate-limited endpoint (Ollama cloud models). */
+  onRetry?: RetryOptions["onRetry"];
 }
 
 /** Native Ollama /api/chat client with tool calling and NDJSON streaming. */
@@ -41,6 +43,7 @@ export class OllamaProvider implements LlmProvider {
       {},
       request.signal,
       "Ollama",
+      { onRetry: this.options.onRetry },
     );
 
     const result: ChatResult = { text: "", thinking: "", toolCalls: [], stopReason: "stop" };

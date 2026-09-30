@@ -288,11 +288,48 @@ ollama pull qwen2.5-coder:7b    <span class="c"># most laptops</span></code></pr
           a free tier with monthly credits, and provider rates carry no markup.
         </p>
 
+        <h3>Groq and Google AI Studio</h3>
+        <p>
+          Both are OpenAI-compatible and free to start. Create a key, point
+          <code>gbsAgent.openai.baseUrl</code> at the endpoint, run <strong>GBS Agent: Set API Key</strong>, then pick
+          a tool-calling model in the chip.
+        </p>
+        <div class="table">
+          <table>
+            <thead>
+              <tr><th>Endpoint</th><th>Base URL</th><th>Free tier</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><a href="https://console.groq.com/keys">Groq</a><br /><code>openai/gpt-oss-120b</code></td>
+                <td><code>https://api.groq.com/openai/v1</code></td>
+                <td>~30 req/min · ~1,000/day</td>
+              </tr>
+              <tr>
+                <td><a href="https://aistudio.google.com/apikey">Google AI Studio</a><br /><code>gemini-2.5-flash</code></td>
+                <td><code>https://generativelanguage.googleapis.com/v1beta/openai/</code></td>
+                <td>~10–15 req/min · ~250/day</td>
+              </tr>
+              <tr>
+                <td>Hugging Face router</td>
+                <td><code>https://router.huggingface.co/v1</code></td>
+                <td>Monthly credits</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Judge a free tier by <strong>requests</strong>, not tokens: one instruction becomes many model calls — three
+          to eight for a small edit, twenty to sixty for a refactor that uses subagents. Groq's daily cap is roughly
+          30–100 agent tasks; Google's is roughly 10–30.
+        </p>
+
         <h3>Other cloud endpoints</h3>
         <p>
-          Any OpenAI-compatible provider works the same way: set <code>gbsAgent.openai.baseUrl</code>, run
-          <strong>GBS Agent: Set API Key</strong>, pick a tool-calling model. Before any code leaves your machine you
-          are asked once per destination.
+          Any OpenAI-compatible provider works the same way — OpenRouter, Together, Cerebras, Azure OpenAI, a company
+          gateway. Before any code leaves your machine you are asked once per destination, and the saved key is bound
+          to that endpoint, so switching providers means setting the key again. Check the provider's data policy
+          before sending client code: free tiers often carry weaker guarantees than paid ones.
         </p>
       </section>
 

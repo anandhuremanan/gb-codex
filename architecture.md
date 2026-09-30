@@ -28,7 +28,7 @@ Each user message starts a **turn**. The agent calls the model with the system p
 | `src/extension.ts` | Activation: output channel, controller, webview provider, diff content provider, commands. |
 | `src/config.ts` | Typed settings, config updates, API-key lookup (SecretStorage → settings → env). |
 | `src/llm/types.ts` | Provider-neutral `LlmMessage`, `ToolCall`, `ToolSpec`, `ChatResult`. |
-| `src/llm/http.ts` | `postJson` with clear connection errors, `readLines` (buffers partial lines across chunks), cancellation. |
+| `src/llm/http.ts` | `postJson` with clear connection errors, retry with backoff for busy endpoints, `readLines` (buffers partial lines across chunks), cancellation. |
 | `src/llm/ollama.ts` | Native Ollama chat with tools, thinking, usage (`prompt_eval_count`/`eval_count`), `num_ctx`. |
 | `src/llm/openai.ts` | OpenAI-compatible SSE streaming; assembles tool-call argument fragments; usage via `stream_options`. |
 | `src/llm/adaptiveProvider.ts` | Uses native tool calling; on "model does not support tools" switches that model to a text protocol. Also recovers `<tool_call>` text from models that emit it inline. |
@@ -62,6 +62,21 @@ Each user message starts a **turn**. The agent calls the model with the system p
 | `task` | Subagent. `explore` gets read-only tools and runs concurrently; `general` can edit and run commands. Only its final report enters the main context. |
 
 Read-only tools (and explore subagents) run in parallel when the model batches them. Mutating tools run sequentially in the order requested.
+
+## Surviving a busy endpoint
+
+Rate limits and provider overload are the normal failure mode of hosted models, especially on free tiers, so they are
+handled in the transport rather than left to the turn:
+
+- **Retried statuses**: 408, 425, 429, 500, 502, 503, 504. Everything else (401, 404, a malformed request) fails
+  immediately, because retrying cannot help.
+- **Three retries** by default, with exponential backoff and jitter (about 1s, 2s, 4s) so a fleet of clients does not
+  retry in lockstep.
+- **`Retry-After` wins** when the server sends one, capped at 60s — a longer wait is reported as a failure instead of
+  silently stalling the turn.
+- **Cancellable**: the wait listens to the run's abort signal, so <kbd>Esc</kbd> is immediate.
+- **Visible**: each retry updates the status line ("Model server is busy or rate limiting — retrying in 4s (1/3)")
+  and writes a line to the log. `HttpError` carries the retry count, and the final message says how many were spent.
 
 ## Keeping token usage low
 

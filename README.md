@@ -15,7 +15,7 @@ Requires VS Code 1.120 or later.
 
 Choose one of these:
 - **Local model (recommended):** your code never leaves your machine. See [Running local models](#running-local-models).
-- **Cloud model:** see [Using Hugging Face models](#using-hugging-face-models), or [Other cloud endpoints](#other-cloud-endpoints).
+- **Cloud model:** see [Hugging Face](#using-hugging-face-models), [Groq](#groq), [Google AI Studio](#google-ai-studio-gemini), or [any OpenAI-compatible endpoint](#other-cloud-endpoints).
 
 ### 3. Open a project and start chatting
 
@@ -133,11 +133,62 @@ without a markup. The context meter shows tokens, not currency — check spend o
 The first time the agent would send code to a remote endpoint, it asks for confirmation, once per destination, and the
 model chip carries a **cloud** badge from then on.
 
+## Groq
+
+Groq serves open models at very high speed and has the most usable free tier for agent work.
+
+1. Create a key at [console.groq.com/keys](https://console.groq.com/keys).
+2. Set `gbsAgent.openai.baseUrl` to `https://api.groq.com/openai/v1`.
+3. Run **GBS Agent: Set API Key** and paste the key.
+4. Open the model chip and pick a tool-calling model — `openai/gpt-oss-120b` is a good default. The chip lists what
+   your key can reach; the console shows the current catalogue.
+
+Free tier at the time of writing: about 30 requests a minute and 1,000 a day on `gpt-oss-120b`. That is roughly
+30–100 agent tasks a day (see [How free tiers run out](#how-free-tiers-run-out)).
+
+## Google AI Studio (Gemini)
+
+Gemini's Flash models are strong at tool calling and have the largest context of the free options.
+
+1. Create a key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
+2. Set `gbsAgent.openai.baseUrl` to `https://generativelanguage.googleapis.com/v1beta/openai/`.
+3. Run **GBS Agent: Set API Key** and paste the key.
+4. Pick a Flash-class model, for example `gemini-2.5-flash`. Check AI Studio for newer Flash ids; the Pro models left
+   the free tier in April 2026.
+
+Free tier at the time of writing: roughly 10–15 requests a minute, 250 a day and 250k tokens a minute on Flash
+models — about 10–30 agent tasks a day.
+
+## How free tiers run out
+
+Free tiers are usually advertised in tokens, but an agent is limited by **requests**. One instruction becomes many
+model calls: a small edit is three to eight, a refactor that uses subagents can be twenty to sixty. So a daily request
+cap matters far more than a token allowance, and a per-minute cap below about ten requests makes the agent feel stalled
+rather than slow.
+
+| Endpoint | Requests/min | Requests/day | Notes |
+|---|---|---|---|
+| Groq | ~30 | ~1,000 | Best free fit; very fast |
+| Google AI Studio | ~10–15 | ~250 | Large context, good tool use |
+| Hugging Face router | Varies by provider | Credit-based | Free monthly credits; 429s when a provider is busy |
+| Ollama cloud (`:cloud` models) | Account limits | Account limits | Stays on the Ollama provider — no endpoint change |
+| Local (Ollama, LM Studio, llama.cpp) | Unlimited | Unlimited | The only option with no caps and no data leaving |
+
+Two practical notes. **Free tiers rate-limit hard**, but a busy endpoint no longer ends the turn: a 429 or a 5xx is
+retried three times with exponential backoff, honouring the server's `Retry-After`, and the status line shows the wait
+(<kbd>Esc</kbd> cancels it). Only when the retries are exhausted does the turn stop. And the saved key is **bound to
+the endpoint it was saved for**, so after changing `openai.baseUrl` you must run **GBS Agent: Set API Key** again and
+confirm the new destination.
+
 ## Other cloud endpoints
 
 Anything OpenAI-compatible works the same way: set `gbsAgent.openai.baseUrl` to the provider's `/v1` URL, run
-**GBS Agent: Set API Key**, and pick a tool-calling model. That covers OpenRouter, Together, Groq, Azure OpenAI and
+**GBS Agent: Set API Key**, and pick a tool-calling model. That covers OpenRouter, Together, Cerebras, Azure OpenAI and
 company-hosted gateways.
+
+Before sending anyone's code to a cloud endpoint, check the provider's data policy — free tiers often carry weaker
+guarantees than paid ones, and some reserve the right to train on requests. For client code, local models avoid the
+question entirely.
 
 ## Using the agent
 

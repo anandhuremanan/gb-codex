@@ -12,6 +12,7 @@ import { writeFileTool } from "../agent/tools/writeFile";
 import { TranscriptItem } from "../agent/transcript";
 import { resolvePath } from "../agent/workspace";
 import { getApiKey, readConfig } from "../config";
+import { CancelledError, HttpError, postJson } from "../llm/http";
 import { SessionController } from "../session/controller";
 import { SessionStore } from "../session/store";
 
@@ -319,6 +320,110 @@ suite("Agent end-to-end (mock Ollama)", () => {
         controller.dispose();
       },
     );
+  });
+});
+
+// ─── Retry on busy endpoints ────────────────────────────────────────────────
+
+/** Serves a scripted sequence of responses and records how many requests arrived. */
+async function withFlakyServer(
+  plan: Array<{ status: number; headers?: Record<string, string>; body?: string }>,
+  run: (url: string, hits: () => number) => Promise<void>,
+) {
+  let hits = 0;
+  const server = http.createServer((req, res) => {
+    const step = plan[Math.min(hits, plan.length - 1)];
+    hits++;
+    req.resume();
+    req.on("end", () => {
+      res.writeHead(step.status, { "Content-Type": "application/json", ...(step.headers ?? {}) });
+      res.end(step.body ?? "{}");
+    });
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as { port: number }).port;
+  try {
+    await run(`http://127.0.0.1:${port}/v1/chat/completions`, () => hits);
+  } finally {
+    server.close();
+  }
+}
+
+suite("Retry on busy endpoints", () => {
+  test("a 429 is retried and the turn survives", async () => {
+    await withFlakyServer(
+      [
+        { status: 429, body: '{"message":"server overload, please try again later","type":"server_overload"}' },
+        { status: 200, body: '{"ok":true}' },
+      ],
+      async (url, hits) => {
+        const seen: number[] = [];
+        const res = await postJson(url, {}, {}, new AbortController().signal, "Model server", {
+          baseDelayMs: 10,
+          onRetry: (info) => seen.push(info.status),
+        });
+        assert.strictEqual(res.status, 200);
+        assert.strictEqual(hits(), 2, "should have retried exactly once");
+        assert.deepStrictEqual(seen, [429], "the UI should have been told about the 429");
+      },
+    );
+  });
+
+  test("Retry-After is honoured instead of the backoff", async () => {
+    await withFlakyServer(
+      [
+        { status: 503, headers: { "Retry-After": "1" }, body: "busy" },
+        { status: 200, body: "{}" },
+      ],
+      async (url) => {
+        let delay = 0;
+        const started = Date.now();
+        await postJson(url, {}, {}, new AbortController().signal, "Model server", {
+          baseDelayMs: 10_000,
+          onRetry: (info) => (delay = info.delayMs),
+        });
+        assert.strictEqual(delay, 1000, "should wait the second the server asked for, not the 10s backoff");
+        assert.ok(Date.now() - started >= 900, "should actually have waited");
+      },
+    );
+  });
+
+  test("gives up after the configured retries and reports them", async () => {
+    await withFlakyServer([{ status: 429, body: "still busy" }], async (url, hits) => {
+      const err = await postJson(url, {}, {}, new AbortController().signal, "Model server", {
+        maxRetries: 2,
+        baseDelayMs: 10,
+      }).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      assert.ok(err instanceof HttpError, `expected HttpError, got ${err}`);
+      assert.strictEqual((err as HttpError).status, 429);
+      assert.strictEqual((err as HttpError).retries, 2);
+      assert.match((err as HttpError).message, /after 2 retries/);
+      assert.strictEqual(hits(), 3, "first attempt plus two retries");
+    });
+  });
+
+  test("a 400 is not retried, and Esc cancels during the wait", async () => {
+    await withFlakyServer([{ status: 400, body: "bad request" }], async (url, hits) => {
+      await postJson(url, {}, {}, new AbortController().signal, "Model server", { baseDelayMs: 10 }).then(
+        () => assert.fail("should have thrown"),
+        (e: unknown) => assert.ok(e instanceof HttpError && e.status === 400),
+      );
+      assert.strictEqual(hits(), 1, "client errors must fail immediately");
+    });
+
+    await withFlakyServer([{ status: 429, body: "busy" }], async (url) => {
+      const abort = new AbortController();
+      const pending = postJson(url, {}, {}, abort.signal, "Model server", { baseDelayMs: 5_000 });
+      setTimeout(() => abort.abort(), 100);
+      const err = await pending.then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      assert.ok(err instanceof CancelledError, `expected CancelledError, got ${err}`);
+    });
   });
 });
 

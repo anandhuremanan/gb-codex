@@ -4,6 +4,22 @@ All notable changes to the "gbs-local-dev" extension will be documented in this 
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.0.12] - 2026-09-30
+
+### Added
+- Busy endpoints are retried instead of ending the turn. A 429 (rate limit or an overloaded provider) or a gateway
+  5xx is retried three times with exponential backoff and jitter, honouring `Retry-After` up to a minute. The status
+  line shows the wait and Esc cancels it; the log records every attempt. This matters most on free tiers, where a
+  transient "server overload" was previously enough to stop a turn.
+- Clearer messages when the retries do not clear it: a 429 or 5xx now explains what happened and what to try, instead
+  of showing the raw response body.
+
+### Changed
+- Documentation for cloud endpoints: a full Hugging Face walkthrough (fine-grained token with the *Make calls to
+  Inference Providers* permission, the router base URL, model ids and routing suffixes), plus setup for **Groq** and
+  **Google AI Studio**, a comparison of what free tiers actually allow, and troubleshooting for 401, 402, 404 and
+  empty model lists.
+
 ## [0.0.11] - 2026-09-22
 
 ### Changed
