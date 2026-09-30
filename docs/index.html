@@ -259,13 +259,40 @@ ollama pull qwen2.5-coder:7b    <span class="c"># most laptops</span></code></pr
           was started with.
         </p>
 
-        <h3>Cloud</h3>
+        <h3>Hugging Face</h3>
         <p>
-          Set <code>gbsAgent.openai.baseUrl</code> to your provider, run
-          <strong>GBS Agent: Set API Key</strong>, then enter the model id. The
-          key lives in VS Code's secret storage and is only sent to that
-          endpoint. Before any code leaves your machine you're asked once per
-          destination.
+          Hundreds of open models behind one OpenAI-compatible endpoint, on a single token. It is the default cloud
+          endpoint, so there are four steps:
+        </p>
+        <ol>
+          <li>
+            Create a <a href="https://huggingface.co/settings/tokens/new?ownUserPermissions=inference.serverless.write&tokenType=fineGrained">fine-grained token</a> with the
+            <strong>Make calls to Inference Providers</strong> permission — nothing else.
+          </li>
+          <li>
+            Run <strong>GBS Agent: Set API Key</strong> and paste it. It goes to VS Code's secret storage, bound to
+            that endpoint, never to <code>settings.json</code>. <code>HF_TOKEN</code> in your environment works too.
+          </li>
+          <li>
+            Leave <code>gbsAgent.openai.baseUrl</code> at <code>https://router.huggingface.co/v1</code> and pick
+            <strong>OpenAI-compatible</strong> in the model chip.
+          </li>
+          <li>
+            Choose a <strong>tool-calling</strong> model — the chip lists what the router is serving once the token is
+            saved. Ids look like <code>openai/gpt-oss-120b</code>.
+          </li>
+        </ol>
+        <p>
+          Add a suffix to route the request: <code>:cheapest</code> for the lowest price per token,
+          <code>:preferred</code> for your own provider order, or a provider name such as <code>:groq</code>. There is
+          a free tier with monthly credits, and provider rates carry no markup.
+        </p>
+
+        <h3>Other cloud endpoints</h3>
+        <p>
+          Any OpenAI-compatible provider works the same way: set <code>gbsAgent.openai.baseUrl</code>, run
+          <strong>GBS Agent: Set API Key</strong>, pick a tool-calling model. Before any code leaves your machine you
+          are asked once per destination.
         </p>
       </section>
 

@@ -15,7 +15,7 @@ Requires VS Code 1.120 or later.
 
 Choose one of these:
 - **Local model (recommended):** your code never leaves your machine. See [Running local models](#running-local-models).
-- **Cloud model:** see [Using a cloud model](#using-a-cloud-model).
+- **Cloud model:** see [Using Hugging Face models](#using-hugging-face-models), or [Other cloud endpoints](#other-cloud-endpoints).
 
 ### 3. Open a project and start chatting
 
@@ -67,13 +67,77 @@ The agent relies on the model calling tools (reading files, editing, running com
 - **Other models:** if a model rejects tool definitions, the agent automatically switches to a text-based tool format. This works, but less reliably.
 - **Size matters:** very small models (under ~7B) often struggle with multi-step tasks.
 
-## Using a cloud model
+## Using Hugging Face models
 
-1. In **Settings**, set `gbsAgent.openai.baseUrl` to your provider's endpoint. The default is the Hugging Face router, `https://router.huggingface.co/v1`.
-2. Run **GBS Agent: Set API Key** from the Command Palette (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd>). The key is kept in VS Code's secret storage and only sent to that endpoint.
-3. In the model menu, choose **OpenAI-compatible** and enter the model ID (for example `Qwen/Qwen2.5-Coder-32B-Instruct`).
+Hugging Face's Inference Providers router puts hundreds of open models behind one OpenAI-compatible endpoint, billed
+through a single token. It is the extension's default cloud endpoint, so setup is a token and a model name.
 
-The first time the agent sends code to a remote endpoint or cloud model, it asks for confirmation. It asks once per destination.
+### 1. Create a token
+
+1. Open [**Access Tokens → New token**](https://huggingface.co/settings/tokens/new?ownUserPermissions=inference.serverless.write&tokenType=fineGrained) — that link pre-selects the right options — or go to
+   huggingface.co → your avatar → **Access Tokens** → **Create new token** → **Fine-grained**.
+2. Tick **Make calls to Inference Providers**. That single permission is all the agent needs; leave repository write
+   access off.
+3. Create the token and copy it (it starts with `hf_`). Hugging Face shows it once.
+
+### 2. Store the token in VS Code
+
+Run **GBS Agent: Set API Key** from the Command Palette (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd>) and paste it.
+
+The token goes into VS Code's secret storage, never into `settings.json` and never into the repository. It is bound to
+the endpoint it was saved for, so if you later point the extension at a different host, the extension asks before
+sending the token there.
+
+Two alternatives, in the order the extension looks for them: the deprecated `gbsAgent.openai.apiKey` /
+`gbsAgent.huggingfaceToken` settings (plain text — avoid), then the `HF_TOKEN` or `OPENAI_API_KEY` environment
+variables. The environment route is handy on a shared build machine where you don't want the token stored at all.
+
+### 3. Point the extension at the router
+
+| Setting | Value |
+|---|---|
+| `gbsAgent.provider` | `openai` |
+| `gbsAgent.openai.baseUrl` | `https://router.huggingface.co/v1` (the default) |
+
+Or just click the model chip under the chat input and choose **OpenAI-compatible**.
+
+### 4. Choose a model
+
+Open the model chip. With a token saved, the list is fetched live from the router's `/v1/models`, so you can pick from
+what is actually being served; you can also type an id yourself.
+
+**The model must support tool calling** — that is what lets the agent read files and run commands. Browse
+[models with a provider](https://huggingface.co/models?inference_provider=all&other=conversational) on the Hub, or try
+one out first in the [Inference Playground](https://huggingface.co/playground). Ids look like `openai/gpt-oss-120b` or
+`deepseek-ai/DeepSeek-R1`.
+
+You can append a suffix to the id to control routing:
+
+| Suffix | Effect |
+|---|---|
+| *(none)* or `:fastest` | Highest throughput provider — the default |
+| `:cheapest` | Lowest price per output token |
+| `:preferred` | Your provider order from [Inference Provider settings](https://hf.co/settings/inference-providers) |
+| `:groq`, `:together`, `:fireworks-ai`, … | Pin one specific provider |
+
+For example, `openai/gpt-oss-120b:cheapest`.
+
+Two settings worth adjusting after picking a model: `gbsAgent.contextWindow`, so compaction matches the model's real
+context length, and `gbsAgent.subagentModel`, which can point exploration at a smaller, cheaper model.
+
+### Cost and consent
+
+Inference Providers has a free tier with monthly credits, more for PRO and Team accounts, and charges provider rates
+without a markup. The context meter shows tokens, not currency — check spend on the Hugging Face billing page.
+
+The first time the agent would send code to a remote endpoint, it asks for confirmation, once per destination, and the
+model chip carries a **cloud** badge from then on.
+
+## Other cloud endpoints
+
+Anything OpenAI-compatible works the same way: set `gbsAgent.openai.baseUrl` to the provider's `/v1` URL, run
+**GBS Agent: Set API Key**, and pick a tool-calling model. That covers OpenRouter, Together, Groq, Azure OpenAI and
+company-hosted gateways.
 
 ## Using the agent
 
@@ -225,12 +289,16 @@ In the chat input: `/new`, `/compact`, `/skills`, `/help`.
 | `gbsAgent.skills.enabled` | `true` | Use skills at all |
 | `gbsAgent.skillsPath` | *(empty)* | Your personal skills folder (default: the extension's own folder) |
 
-The provider, model, endpoints, permission mode, shell, and skills path must be set in **User** settings. Values in a project's `.vscode/settings.json` are ignored for those. API keys belong in secret storage via **GBS Agent: Set API Key**; the older `openai.apiKey` and `huggingfaceToken` settings still work but are deprecated.
+The provider, model, endpoints, permission mode, shell, and skills path must be set in **User** settings. Values in a project's `.vscode/settings.json` are ignored for those. API keys belong in secret storage via **GBS Agent: Set API Key**; the older `openai.apiKey` and `huggingfaceToken` settings still work but are deprecated, and `HF_TOKEN` or `OPENAI_API_KEY` in the environment is used when nothing is stored.
 
 ## Troubleshooting
 
 - **"Could not reach Ollama"**: start Ollama (`ollama serve`) or check `gbsAgent.ollama.baseUrl`.
 - **Model not found (HTTP 404)**: run `ollama pull <model>`, or pick a model from the model menu.
+- **Hugging Face returns 401**: the token is missing the **Make calls to Inference Providers** permission, or it was saved for a different endpoint — run **GBS Agent: Set API Key** again after changing `openai.baseUrl`.
+- **Hugging Face returns 402, or mentions credits**: the monthly Inference Providers credits are spent. Add a payment method, wait for the reset, or switch the model chip back to a local model.
+- **A Hugging Face model id 404s**: no provider is serving it right now. Check the model's page on the Hub, or pin a provider with a suffix such as `:groq`.
+- **The model menu is empty for OpenAI-compatible**: the endpoint could not be listed — usually no token saved yet, or a base URL without the `/v1` suffix. Type the model id manually meanwhile.
 - **Slow or out of memory**: use a smaller model, or lower `gbsAgent.contextWindow` to `16384`.
 - **The agent doesn't use tools or stops early**: switch to a model trained for tool calling (see [Which models work](#which-models-work)). For llama.cpp, add `--jinja`; for vLLM, add `--enable-auto-tool-choice --tool-call-parser <parser>`.
 - **A skill isn't being used**: check `/skills` — it may be invalid or not allowed for this workspace (**Reload Skills** re-asks). Otherwise make the `description` name the trigger words you actually use, or add an `autoAttach` glob for the files it applies to.
