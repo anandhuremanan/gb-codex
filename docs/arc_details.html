@@ -307,6 +307,43 @@
       margin: 0 0 7px;
     }
 
+
+    .download {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 18px;
+      justify-content: space-between;
+      margin: 26px 0 0;
+      padding: 20px 24px;
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      background: color-mix(in srgb, var(--panel) 78%, transparent);
+    }
+
+    .download h3 {
+      margin: 0 0 4px;
+      font-size: 1.05rem;
+    }
+
+    .download p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.93rem;
+      max-width: 52ch;
+    }
+
+    .download .button {
+      flex: none;
+    }
+
+    .download svg {
+      width: 15px;
+      height: 15px;
+      fill: currentColor;
+    }
+
     .source-note {
       margin: 42px 0 0;
       padding-top: 20px;
@@ -1111,6 +1148,23 @@
         An assistant that can read and change a codebase on its own, shows you every step it takes, asks permission
         before anything it cannot undo, and can run entirely on your own hardware.
       </p>
+    </div>
+
+    <div class="download">
+      <div>
+        <h3>Still confused? Take the plain-English version</h3>
+        <p>
+          A twelve-page guide to everything above with no jargon at all — everyday comparisons, pictures, what the
+          agent can and cannot do, and how it measures up against the better-known tools.
+        </p>
+      </div>
+      <a class="button" href="GBS-Agent-Explained.pdf" download>
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M8 1.5v8.4m0 0 3-3m-3 3-3-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+          <path d="M2.5 11.5v1.6a1.4 1.4 0 0 0 1.4 1.4h8.2a1.4 1.4 0 0 0 1.4-1.4v-1.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+        </svg>
+        Download the PDF
+      </a>
     </div>
   </section>
 
