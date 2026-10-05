@@ -24,6 +24,11 @@ export class SnapshotStore implements vscode.TextDocumentContentProvider {
     return this.snapshots.has(id);
   }
 
+  /** The recorded "before" content, or undefined once it has been evicted. */
+  get(id: string): string | undefined {
+    return this.snapshots.get(id);
+  }
+
   uri(id: string, relPath: string): vscode.Uri {
     return vscode.Uri.from({ scheme: SnapshotStore.scheme, path: `/${relPath}`, query: id });
   }

@@ -4,6 +4,20 @@ All notable changes to the "gbs-local-dev" extension will be documented in this 
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.0.13] - 2026-10-05
+
+### Added
+- **Undo this turn.** The turn summary now carries an undo control that restores every file the turn edited and
+  deletes every file it created. The confirmation lists what will change, including files you have edited since the
+  agent finished, so your own work is never overwritten silently. Originals live in memory for the window, so undo is
+  offered only while they are still held.
+- **`@` mentions.** Type `@` in the composer to pick a file or folder; its contents are attached to that message, so
+  the agent starts from what you pointed at. Folders attach as a listing, unreadable paths are reported to the model
+  rather than dropped, and the total is budgeted against `maxToolOutputChars`.
+- **Pasted screenshots.** Paste an image into the composer to send it with your message — as `images` for Ollama and
+  as content parts for OpenAI-compatible endpoints — with thumbnails in the composer and in the transcript. Capped at
+  four images per message, and stripped from saved sessions so workspace storage stays small.
+
 ## [0.0.12] - 2026-09-30
 
 ### Added

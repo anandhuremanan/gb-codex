@@ -51,11 +51,20 @@ export class SessionStore {
     await this.memento.update(ACTIVE_KEY, id);
   }
 
+  /** Base64 screenshots would bloat workspace storage, so they are dropped on the way in. */
+  private static withoutImages(session: StoredSession): StoredSession {
+    return {
+      ...session,
+      messages: session.messages.map((m) => (m.images ? { ...m, images: undefined } : m)),
+      items: session.items.map((i) => (i.kind === "user" && i.images ? { ...i, images: undefined } : i)),
+    };
+  }
+
   async save(session: StoredSession): Promise<void> {
     if (session.items.length === 0) {
       return;
     }
-    await this.memento.update(sessionKey(session.id), session);
+    await this.memento.update(sessionKey(session.id), SessionStore.withoutImages(session));
     const index = this.list().filter((s) => s.id !== session.id);
     index.unshift({ id: session.id, title: session.title || "New chat", updatedAt: session.updatedAt });
     for (const stale of index.splice(MAX_SESSIONS)) {

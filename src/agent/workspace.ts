@@ -1,3 +1,4 @@
+import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
@@ -159,6 +160,11 @@ export async function writeText(uri: vscode.Uri, content: string): Promise<void>
 }
 
 /** Approximate added/removed line counts (common prefix/suffix trimmed). */
+/** Short fingerprint of a file's contents, used to notice edits made after the agent finished. */
+export function fileHash(content: string): string {
+  return crypto.createHash("sha1").update(content).digest("hex").slice(0, 16);
+}
+
 export function lineDiffStats(before: string, after: string): { added: number; removed: number } {
   const a = before.length ? before.split(/\r?\n/) : [];
   const b = after.length ? after.split(/\r?\n/) : [];

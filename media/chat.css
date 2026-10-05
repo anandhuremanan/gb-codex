@@ -903,6 +903,42 @@ kbd {
   padding-top: 2px;
 }
 
+.undo-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.92em;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+
+.undo-btn:hover {
+  color: var(--fg);
+  border-color: var(--focus);
+  background: var(--surface-2);
+}
+
+.undo-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.undone {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ok);
+  font-size: 0.92em;
+}
+
+.undone svg {
+  width: 12px;
+  height: 12px;
+}
+
 .summary-line {
   display: flex;
   align-items: center;
@@ -1234,6 +1270,51 @@ kbd {
 .composer:focus-within {
   border-color: var(--focus);
   box-shadow: 0 0 0 1px var(--focus);
+}
+
+.img-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.img-chip img {
+  display: block;
+  height: 34px;
+  width: auto;
+  max-width: 90px;
+  object-fit: cover;
+}
+
+.img-chip button {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 100%;
+  color: var(--muted);
+  background: var(--surface-2);
+}
+
+.img-chip button:hover {
+  color: var(--err);
+}
+
+.msg-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.msg-images img {
+  max-width: 100%;
+  max-height: 180px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
 }
 
 .ctx-row {

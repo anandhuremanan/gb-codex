@@ -117,5 +117,8 @@ function toOllamaMessage(m: LlmMessage): Record<string, unknown> {
   if (m.role === "tool") {
     return { role: "tool", content: m.content, tool_name: m.toolName };
   }
+  if (m.images?.length) {
+    return { role: m.role, content: m.content, images: m.images };
+  }
   return { role: m.role, content: m.content };
 }

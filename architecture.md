@@ -40,7 +40,7 @@ Each user message starts a **turn**. The agent calls the model with the system p
 | `src/agent/workspace.ts` | Path containment, editor-aware read/write, version tokens, diff stats. |
 | `src/agent/diagnostics.ts` | Waits briefly for language servers and reports errors in edited files. |
 | `src/agent/permissions.ts` | Permission modes and session "always allow" rules. |
-| `src/agent/snapshots.ts` | In-memory pre-edit contents for VS Code's diff editor. |
+| `src/agent/snapshots.ts` | In-memory pre-edit contents, serving both the diff editor and turn undo. |
 | `src/agent/analyzer.ts` | Detects language, framework, package manager, and build/test commands. |
 | `src/session/controller.ts` | Owns the active session: runs turns, queues messages sent mid-run, batches UI updates (40 ms), approvals, usage, per-turn changed-file summary, model listing. |
 | `src/session/store.ts` | Chat history in `workspaceState` (nothing is written into the repository). |

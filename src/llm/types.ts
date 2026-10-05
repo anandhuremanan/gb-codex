@@ -20,6 +20,8 @@ export interface LlmMessage {
   toolName?: string;
   /** Set once compaction has replaced the content with a stub. */
   elided?: boolean;
+  /** User messages: base64 image data (no data: prefix), for models that accept pictures. */
+  images?: string[];
 }
 
 export interface JsonSchema {

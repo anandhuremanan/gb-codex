@@ -199,6 +199,8 @@ Type what you want and press <kbd>Enter</kbd> (<kbd>Shift</kbd>+<kbd>Enter</kbd>
 > Add rate limiting to the login endpoint, 5 attempts per minute per IP, and make sure the auth tests still pass.
 
 - **The file you have open is attached** automatically, along with any selected code. The chip above the input shows what will be sent; click the × to leave it out.
+- **Point at anything else with `@`.** Type `@` and a few letters to pick a file or folder from the workspace; its contents are attached to that message, so the agent starts where you meant instead of searching. Mention as many as you like — attachments are capped at twice `maxToolOutputChars` in total.
+- **Paste a screenshot.** Copy an image and paste it into the input to attach it (up to four per message). It is sent to the model as a picture, so this only helps with models that accept images — ask one that doesn't and it will say so. Screenshots stay in the live chat only; they are not written to workspace storage, so they disappear when the window reloads.
 - **You can keep typing while it works.** Your message is delivered at the agent's next step, so you can redirect it without stopping: *"actually, put it in middleware instead"*.
 - **Stop any time** with <kbd>Esc</kbd> or the stop button. Finished edits stay; nothing is rolled back.
 - On an empty chat, the suggestion buttons are a quick way to start (overview of the codebase, find bugs, write tests, refactor the selection).
@@ -227,6 +229,7 @@ The permission chip under the input switches the overall mode: **Auto-edit** (de
 ### Reviewing changes
 
 - Each turn ends with a summary: how long it took, tokens used, and every file changed with `+`/`−` counts.
+- **Undo this turn** on that summary puts every file back the way it was before the turn started — restoring what was edited and deleting what was created. You are shown the list first, including anything you have edited since, and files you changed yourself are flagged before they are overwritten. The originals are held in memory for the window, so undo is unavailable after a reload.
 - The diff icon opens VS Code's diff view comparing the file with its state **before the turn**.
 - When a file is open in the editor, edits go through the editor buffer and are saved, so <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes them as usual. Files that aren't open are written directly — use the diff view or git to review those.
 - `path:line` references in the chat are clickable.

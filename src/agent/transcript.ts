@@ -6,6 +6,8 @@ export interface UserItem {
   kind: "user";
   id: string;
   text: string;
+  /** Data URLs of pictures the user pasted, shown as thumbnails. */
+  images?: string[];
 }
 
 export interface AssistantItem {
@@ -50,6 +52,8 @@ export interface ChangedFile {
   removed: number;
   snapshotId?: string;
   created: boolean;
+  /** Fingerprint of the content the agent left behind, so undo can spot later edits. */
+  afterHash?: string;
 }
 
 export interface TurnSummaryItem {
@@ -59,6 +63,8 @@ export interface TurnSummaryItem {
   inputTokens: number;
   outputTokens: number;
   files: ChangedFile[];
+  /** Set once the user has rolled this turn back. */
+  undone?: boolean;
 }
 
 export type TranscriptItem = UserItem | AssistantItem | ToolItem | NoticeItem | TurnSummaryItem;

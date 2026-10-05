@@ -30,6 +30,7 @@
     wand: '<path d="M2 14l8-8M9 2v2M13 6h-2M12 3l-1.5 1.5"/>',
     bug: '<rect x="4.5" y="5" width="7" height="8.5" rx="3.5"/><path d="M8 5V3M2 9h2.5M11.5 9H14M3 5.5l1.8 1.3M13 5.5l-1.8 1.3M3 13l1.8-1.3M13 13l-1.8-1.3"/>',
     beaker: '<path d="M6 1.5v5L2.5 13a1 1 0 0 0 .9 1.5h9.2a1 1 0 0 0 .9-1.5L10 6.5v-5M5 1.5h6"/>',
+    undo: '<path d="M2.5 7.5h8a3 3 0 0 1 0 6H6"/><path d="M5 4L1.5 7.5 5 11"/>',
     book: '<path d="M2.5 3.5A1.5 1.5 0 0 1 4 2h8.5v10.5H4A1.5 1.5 0 0 0 2.5 14z"/><path d="M2.5 12.5A1.5 1.5 0 0 1 4 11h8.5"/>',
   };
   const icon = (name) => `<svg viewBox="0 0 16 16" aria-hidden="true">${ICONS[name] || ""}</svg>`;
@@ -294,6 +295,10 @@
     includeEditor: persisted.includeEditor !== false,
     models: [],
     slashIndex: 0,
+    mentionIndex: 0,
+    mentionFiles: [],
+    mentionQuery: null,
+    images: [],
   };
 
   // ─── Layout ───────────────────────────────────────────────────────────────
@@ -342,6 +347,7 @@
       </div>
       <div class="popover" id="skills-pop" hidden></div>
       <div class="slash-menu" id="slash" hidden></div>
+      <div class="slash-menu" id="mention" hidden></div>
     </div>`;
 
   const els = {
@@ -369,6 +375,7 @@
     subInput: /** @type {HTMLInputElement} */ ($("#sub-input")),
     modelList: $("#model-list"),
     slash: $("#slash"),
+    mention: $("#mention"),
     skillsChip: $("#skills-chip"),
     skillsLabel: $("#skills-label"),
     skillsPop: $("#skills-pop"),
@@ -415,7 +422,7 @@
       <div class="suggestions">${SUGGESTIONS.map(
         (s) => `<button class="suggestion" data-suggest="${esc(s.text)}">${icon(s.icon)}<span>${esc(s.text)}</span></button>`,
       ).join("")}</div>
-      <div class="tips"><kbd>Enter</kbd> send · <kbd>Shift</kbd>+<kbd>Enter</kbd> newline · <kbd>Esc</kbd> stop · <kbd>/</kbd> commands</div>
+      <div class="tips"><kbd>Enter</kbd> send · <kbd>Shift</kbd>+<kbd>Enter</kbd> newline · <kbd>Esc</kbd> stop · <kbd>/</kbd> commands · <kbd>@</kbd> attach a file</div>
     </div>`);
     els.messages.appendChild(welcome);
   }
@@ -565,7 +572,12 @@
           .join("")}
       </div>`;
     }
-    el.innerHTML = `${files}<div class="summary-line">${esc(parts.join(" · "))}</div>`;
+    const undo = item.files && item.files.some((f) => f.snapshotId)
+      ? item.undone
+        ? `<span class="undone">${icon("check")} undone</span>`
+        : `<button class="undo-btn" data-undo="${esc(item.id)}" title="Put every file back the way it was before this turn">${icon("undo")} Undo this turn</button>`
+      : "";
+    el.innerHTML = `${files}<div class="summary-line"><span>${esc(parts.join(" · "))}</span>${undo}</div>`;
   }
 
   function paint(el, item) {
@@ -573,6 +585,12 @@
       case "user":
         el.className = "item msg-user";
         el.textContent = item.text;
+        if (item.images?.length) {
+          const strip = document.createElement("div");
+          strip.className = "msg-images";
+          strip.innerHTML = item.images.map((src) => `<img src="${esc(src)}" alt="pasted screenshot" />`).join("");
+          el.appendChild(strip);
+        }
         break;
       case "assistant":
         paintAssistant(el, item);
@@ -810,15 +828,21 @@
 
   function renderEditorChip() {
     const e = state.editor;
+    const thumbs = state.images
+      .map(
+        (src, i) =>
+          `<span class="img-chip"><img src="${esc(src)}" alt="pasted screenshot" /><button data-drop-image="${i}" title="Remove">${icon("x")}</button></span>`,
+      )
+      .join("");
     if (!e) {
-      els.ctxRow.innerHTML = "";
+      els.ctxRow.innerHTML = thumbs;
       return;
     }
     const label = e.selection ? `${e.path}:${e.selection}` : e.path;
     els.ctxRow.innerHTML = `<span class="ctx-chip${state.includeEditor ? "" : " off"}" title="${state.includeEditor ? "The agent will see which file is open and any selected code" : "Editor context will not be sent"}">
       ${icon("file")}<span class="name">${esc(label)}</span>
       <button data-toggle-editor title="${state.includeEditor ? "Don't include" : "Include"}">${icon(state.includeEditor ? "x" : "plus")}</button>
-    </span>`;
+    </span>` + thumbs;
   }
 
   function renderHeader() {
@@ -837,6 +861,60 @@
           )
           .join("")
       : '<div class="history-empty">No previous chats</div>';
+  }
+
+  /** The @word immediately before the caret, or null. */
+  function mentionQuery() {
+    const caret = els.input.selectionStart ?? els.input.value.length;
+    const match = /(?:^|\s)@([^\s@]*)$/.exec(els.input.value.slice(0, caret));
+    return match ? match[1] : null;
+  }
+
+  function renderMention() {
+    const query = mentionQuery();
+    if (query === null) {
+      els.mention.hidden = true;
+      state.mentionQuery = null;
+      return;
+    }
+    if (query !== state.mentionQuery) {
+      state.mentionQuery = query;
+      state.mentionIndex = 0;
+      vscode.postMessage({ type: "findFiles", query });
+    }
+    paintMention();
+  }
+
+  function paintMention() {
+    const files = state.mentionFiles;
+    if (state.mentionQuery === null || !files.length) {
+      els.mention.hidden = true;
+      return;
+    }
+    state.mentionIndex = Math.min(state.mentionIndex, files.length - 1);
+    els.mention.hidden = false;
+    els.mention.innerHTML = files
+      .map((f, i) => {
+        const cut = f.lastIndexOf("/");
+        const dir = cut < 0 ? "" : f.slice(0, cut + 1);
+        const name = cut < 0 ? f : f.slice(cut + 1);
+        return `<button class="slash-item${i === state.mentionIndex ? " active" : ""}" data-mention="${esc(f)}"><span class="cmd">${esc(name)}</span><span class="desc">${esc(dir)}</span></button>`;
+      })
+      .join("");
+  }
+
+  /** Replaces the half-typed @word at the caret with the chosen path. */
+  function applyMention(path) {
+    const caret = els.input.selectionStart ?? els.input.value.length;
+    const before = els.input.value.slice(0, caret).replace(/@([^\s@]*)$/, `@${path} `);
+    els.input.value = before + els.input.value.slice(caret);
+    els.input.selectionStart = els.input.selectionEnd = before.length;
+    els.mention.hidden = true;
+    state.mentionQuery = null;
+    state.mentionFiles = [];
+    els.input.focus();
+    autosize();
+    saveUiState();
   }
 
   function renderSlash() {
@@ -939,6 +1017,12 @@
         state.editor = msg.editor;
         renderEditorChip();
         break;
+      case "files":
+        if (msg.query === state.mentionQuery) {
+          state.mentionFiles = msg.files || [];
+          paintMention();
+        }
+        break;
       case "models":
         state.models = msg.models || [];
         els.modelList.innerHTML = state.models.map((m) => `<option value="${esc(m)}"></option>`).join("");
@@ -980,13 +1064,17 @@
     if (!value) {
       return;
     }
-    vscode.postMessage({ type: "send", text: value, includeEditor: state.includeEditor });
+    vscode.postMessage({ type: "send", text: value, includeEditor: state.includeEditor, images: state.images });
+    state.images = [];
+    renderEditorChip();
     if (text === undefined) {
       els.input.value = "";
       autosize();
       saveUiState();
     }
     els.slash.hidden = true;
+    els.mention.hidden = true;
+    state.mentionQuery = null;
     stickToBottom = true;
     renderComposer();
   }
@@ -1000,10 +1088,64 @@
     autosize();
     renderComposer();
     renderSlash();
+    renderMention();
     saveUiState();
   });
 
+  els.input.addEventListener("paste", (e) => {
+    const items = [...(e.clipboardData?.items || [])].filter((i) => i.type.startsWith("image/"));
+    if (!items.length) {
+      return;
+    }
+    e.preventDefault();
+    for (const item of items.slice(0, 4 - state.images.length)) {
+      const file = item.getAsFile();
+      if (!file) {
+        continue;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === "string" && state.images.length < 4) {
+          state.images.push(reader.result);
+          renderEditorChip();
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  });
+
+  els.input.addEventListener("click", renderMention);
+  els.input.addEventListener("keyup", (e) => {
+    if (e.key.startsWith("Arrow") || e.key === "Home" || e.key === "End") {
+      renderMention();
+    }
+  });
+
   els.input.addEventListener("keydown", (e) => {
+    if (!els.mention.hidden) {
+      const items = els.mention.querySelectorAll(".slash-item");
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        state.mentionIndex = (state.mentionIndex + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length;
+        paintMention();
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        const chosen = /** @type {HTMLElement} */ (items[state.mentionIndex]);
+        if (chosen) {
+          e.preventDefault();
+          applyMention(chosen.dataset.mention);
+          return;
+        }
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        els.mention.hidden = true;
+        state.mentionQuery = null;
+        return;
+      }
+    }
+
     if (!els.slash.hidden) {
       const items = els.slash.querySelectorAll(".slash-item");
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -1170,6 +1312,12 @@
       return;
     }
 
+    const undoBtn = target.closest("[data-undo]");
+    if (undoBtn) {
+      vscode.postMessage({ type: "undoTurn", id: /** @type {HTMLElement} */ (undoBtn).dataset.undo });
+      return;
+    }
+
     const diff = target.closest("[data-diff]");
     if (diff) {
       const el = /** @type {HTMLElement} */ (diff);
@@ -1237,6 +1385,19 @@
     if (sessionRow) {
       els.history.hidden = true;
       vscode.postMessage({ type: "switchSession", id: /** @type {HTMLElement} */ (sessionRow).dataset.session });
+      return;
+    }
+
+    const dropImage = target.closest("[data-drop-image]");
+    if (dropImage) {
+      state.images.splice(Number(/** @type {HTMLElement} */ (dropImage).dataset.dropImage), 1);
+      renderEditorChip();
+      return;
+    }
+
+    const mention = target.closest("[data-mention]");
+    if (mention) {
+      applyMention(/** @type {HTMLElement} */ (mention).dataset.mention);
       return;
     }
 

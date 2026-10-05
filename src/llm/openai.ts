@@ -159,5 +159,14 @@ function toOpenAIMessage(m: LlmMessage): Record<string, unknown> {
   if (m.role === "tool") {
     return { role: "tool", tool_call_id: m.toolCallId, content: m.content };
   }
+  if (m.images?.length) {
+    return {
+      role: m.role,
+      content: [
+        { type: "text", text: m.content },
+        ...m.images.map((data) => ({ type: "image_url", image_url: { url: `data:image/png;base64,${data}` } })),
+      ],
+    };
+  }
   return { role: m.role, content: m.content };
 }

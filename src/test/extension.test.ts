@@ -427,6 +427,151 @@ suite("Retry on busy endpoints", () => {
   });
 });
 
+// ─── Undo, @mentions and pasted images ──────────────────────────────────────
+
+/** Answers the modal with the given button so undo can run unattended. */
+async function withConfirm<T>(answer: string | undefined, run: () => Promise<T>): Promise<T> {
+  const original = vscode.window.showWarningMessage;
+  (vscode.window as unknown as Record<string, unknown>).showWarningMessage = async () => answer;
+  try {
+    return await run();
+  } finally {
+    (vscode.window as unknown as Record<string, unknown>).showWarningMessage = original;
+  }
+}
+
+suite("Undo, mentions and images", () => {
+  test("undo puts back an edited file and removes a created one", async () => {
+    const edited = vscode.Uri.joinPath(root(), "src/undo-me.ts");
+    await vscode.workspace.fs.writeFile(edited, Buffer.from("export const original = 1;\n"));
+
+    await withMockOllama(
+      (body) => {
+        // write_file refuses to overwrite a file the agent has not read, so read first.
+        const done = body.messages.filter((m: any) => m.role === "tool").length;
+        if (done === 0) {
+          return call("read_file", { path: "src/undo-me.ts" });
+        }
+        if (done === 1) {
+          return call("write_file", { path: "src/undo-me.ts", content: "export const replaced = 2;\n" });
+        }
+        if (done === 2) {
+          return call("write_file", { path: "src/undo-new.ts", content: "export const fresh = 3;\n" });
+        }
+        return say("done");
+      },
+      async () => {
+        const { controller, posts } = createController();
+        await controller.send("change both files", false);
+        await waitForIdle(posts);
+
+        const created = vscode.Uri.joinPath(root(), "src/undo-new.ts");
+        assert.ok((await vscode.workspace.fs.stat(created)).size > 0, "the agent should have created the file");
+        assert.strictEqual(
+          Buffer.from(await vscode.workspace.fs.readFile(edited)).toString(),
+          "export const replaced = 2;\n",
+          "the edit must land before undo can mean anything",
+        );
+
+        const summary = [...transcript(posts).values()].find((i) => i.kind === "summary");
+        assert.ok(summary, "a turn summary should exist");
+
+        await withConfirm("Undo the changes", () => controller.undoTurn(summary!.id));
+
+        const restored = Buffer.from(await vscode.workspace.fs.readFile(edited)).toString();
+        assert.strictEqual(restored, "export const original = 1;\n", "the edited file should be back to its original");
+        await vscode.workspace.fs.stat(created).then(
+          () => assert.fail("the created file should have been removed"),
+          () => undefined,
+        );
+      },
+    );
+  });
+
+  test("undo does nothing when the confirmation is dismissed", async () => {
+    const file = vscode.Uri.joinPath(root(), "src/undo-keep.ts");
+    await vscode.workspace.fs.writeFile(file, Buffer.from("keep me\n"));
+
+    await withMockOllama(
+      (body) => {
+        const done = body.messages.filter((m: any) => m.role === "tool").length;
+        if (done === 0) {
+          return call("read_file", { path: "src/undo-keep.ts" });
+        }
+        if (done === 1) {
+          return call("write_file", { path: "src/undo-keep.ts", content: "changed\n" });
+        }
+        return say("done");
+      },
+      async () => {
+        const { controller, posts } = createController();
+        await controller.send("change it", false);
+        await waitForIdle(posts);
+        const summary = [...transcript(posts).values()].find((i) => i.kind === "summary");
+        assert.ok(summary, "a turn summary should exist");
+        await withConfirm(undefined, () => controller.undoTurn(summary!.id));
+        const after = Buffer.from(await vscode.workspace.fs.readFile(file)).toString();
+        assert.strictEqual(after, "changed\n", "dismissing the modal must leave the file alone");
+      },
+    );
+  });
+
+  test("@mentions attach the file's contents to the message", async () => {
+    const mentioned = vscode.Uri.joinPath(root(), "src/mentioned.ts");
+    await vscode.workspace.fs.writeFile(mentioned, Buffer.from("export const SECRET_MARKER = 42;\n"));
+
+    await withMockOllama(
+      () => say("read it"),
+      async (requests) => {
+        const { controller, posts } = createController();
+        await controller.send("explain @src/mentioned.ts please", false);
+        await waitForIdle(posts);
+        const sent = requests[0].messages[requests[0].messages.length - 1].content as string;
+        assert.match(sent, /<attached_by_user>/, "the attachment block should be present");
+        assert.match(sent, /SECRET_MARKER = 42/, "the file's contents should be attached");
+        assert.match(sent, /explain @src\/mentioned\.ts please/, "the user's own words stay intact");
+      },
+    );
+  });
+
+  test("a missing @mention is reported, not silently dropped", async () => {
+    await withMockOllama(
+      () => say("ok"),
+      async (requests) => {
+        const { controller, posts } = createController();
+        await controller.send("look at @src/not-here.ts", false);
+        await waitForIdle(posts);
+        const sent = requests[0].messages[requests[0].messages.length - 1].content as string;
+        assert.match(sent, /not-here\.ts" error=/, "the model should be told the file could not be read");
+      },
+    );
+  });
+
+  test("pasted screenshots reach the model and are capped", async () => {
+    const png = "iVBORw0KGgoAAAANSUhEUg==";
+    await withMockOllama(
+      () => say("I see it"),
+      async (requests) => {
+        const { controller, posts } = createController();
+        await controller.send("what is wrong here?", false, [
+          `data:image/png;base64,${png}`,
+          png,
+          png,
+          png,
+          png,
+          png,
+        ]);
+        await waitForIdle(posts);
+        const sent = requests[0].messages[requests[0].messages.length - 1];
+        assert.ok(Array.isArray(sent.images), "images should be passed to Ollama as an array");
+        assert.strictEqual(sent.images.length, 4, "at most four images per message");
+        assert.strictEqual(sent.images[0], png, "the data: prefix should be stripped");
+        assert.match(sent.content as string, /<attached_images count="4">/, "the text should mention the screenshots");
+      },
+    );
+  });
+});
+
 suite("Security (real VS Code)", () => {
   test("a repository's .vscode/settings.json cannot change protected settings", async () => {
     const config = vscode.workspace.getConfiguration("gbsAgent");
