@@ -60,6 +60,7 @@
     { cmd: "/new", desc: "Start a new chat" },
     { cmd: "/compact", desc: "Summarize the conversation to free context" },
     { cmd: "/skills", desc: "List the skills available in this project" },
+    { cmd: "/mcp", desc: "List MCP servers and their tools" },
     { cmd: "/help", desc: "Show available commands" },
   ];
 
@@ -685,7 +686,13 @@
       .map((item) => {
         const a = item.approval;
         const isCommand = a.kind === "command";
-        const title = isCommand ? "Run this command?" : a.kind === "read" ? "Read a file that may contain secrets?" : "Allow this edit?";
+        const title = isCommand
+          ? "Run this command?"
+          : a.kind === "read"
+            ? "Read a file that may contain secrets?"
+            : a.kind === "mcp"
+              ? "Call this MCP tool?"
+              : "Allow this edit?";
         const warnings = approvalWarnings(a);
         return `<div class="approval" data-approval="${item.id}">
           <div class="approval-title">${icon("shield")}<span>${title}</span></div>
@@ -735,6 +742,9 @@
       if (/\b(curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod|certutil|bitsadmin|scp|ssh|nc|ncat)\b/i.test(approval.detail)) {
         warnings.push("Contacts the network.");
       }
+    }
+    if (approval.kind === "mcp") {
+      warnings.push("Runs a tool in an MCP server. It may read or change files without the agent's edit review.");
     }
     if (approval.kind === "edit" && !approval.alwaysLabel) {
       warnings.push("This file controls tooling, scripts, CI, or credentials; review the change carefully.");

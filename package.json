@@ -68,6 +68,16 @@
         "title": "Show Logs",
         "category": "GBS Agent",
         "icon": "$(output)"
+      },
+      {
+        "command": "gbsAgent.showMcpServers",
+        "title": "Show MCP Servers",
+        "category": "GBS Agent"
+      },
+      {
+        "command": "gbsAgent.reloadMcpServers",
+        "title": "Reload MCP Servers",
+        "category": "GBS Agent"
       }
     ],
     "menus": {
@@ -234,6 +244,30 @@
           "scope": "machine",
           "markdownDescription": "Folder holding your personal/company skills, available in every project (one sub-folder per skill). Leave empty to use the extension's own folder (command: **GBS Agent: Open Skills Folder**).",
           "order": 6
+        },
+        "gbsAgent.mcp.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Start MCP servers and give their tools to the agent. Servers come from `.mcp.json` or `.gbs/mcp.json` in the project (asked once per workspace) and from `#gbsAgent.mcpServers#`.",
+          "order": 7
+        },
+        "gbsAgent.mcpServers": {
+          "type": "object",
+          "default": {},
+          "scope": "machine",
+          "markdownDescription": "MCP servers available in every project, in the same format as `.mcp.json`. Only stdio servers are supported. Example:\n\n```json\n{\n  \"grampro\": { \"command\": \"npx\", \"args\": [\"-y\", \"@grampro/kit\", \"mcp\"] }\n}\n```\n\n`${VAR}` and `${VAR:-default}` in `command`, `args`, `env` and `cwd` are read from the environment.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "command": { "type": "string", "description": "Program to start, e.g. npx or node." },
+              "args": { "type": "array", "items": { "type": "string" } },
+              "env": { "type": "object", "additionalProperties": { "type": "string" } },
+              "cwd": { "type": "string", "description": "Working folder; relative paths are resolved from the workspace. Defaults to the workspace folder." },
+              "disabled": { "type": "boolean" }
+            },
+            "required": ["command"]
+          },
+          "order": 8
         }
       }
     }

@@ -19,6 +19,9 @@ export interface AgentConfig {
   shell: string;
   skillsEnabled: boolean;
   skillsPath: string;
+  mcpEnabled: boolean;
+  /** User-level MCP servers (`gbsAgent.mcpServers`), in `.mcp.json` entry format. */
+  mcpServers: Record<string, unknown>;
 }
 
 const SECTION = "gbsAgent";
@@ -39,6 +42,7 @@ export const PROTECTED_SETTINGS = new Set([
   "permissionMode",
   "shell",
   "skillsPath",
+  "mcpServers",
 ]);
 
 function setting<T>(key: string, fallback: T): T {
@@ -68,6 +72,8 @@ export function readConfig(): AgentConfig {
     shell: setting<string>("shell", "").trim(),
     skillsEnabled: setting<boolean>("skills.enabled", true),
     skillsPath: setting<string>("skillsPath", "").trim(),
+    mcpEnabled: setting<boolean>("mcp.enabled", true),
+    mcpServers: setting<Record<string, unknown>>("mcpServers", {}) ?? {},
   };
 }
 

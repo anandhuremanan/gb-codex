@@ -42,6 +42,7 @@ Each user message starts a **turn**. The agent calls the model with the system p
 | `src/agent/permissions.ts` | Permission modes and session "always allow" rules. |
 | `src/agent/snapshots.ts` | In-memory pre-edit contents, serving both the diff editor and turn undo. |
 | `src/agent/analyzer.ts` | Detects language, framework, package manager, and build/test commands. |
+| `src/mcp/*` | MCP support: config loading (`config.ts`), a dependency-free stdio JSON-RPC client (`client.ts`), process lifecycle (`manager.ts`), and the adapter that turns server tools into agent tools (`tools.ts`). |
 | `src/session/controller.ts` | Owns the active session: runs turns, queues messages sent mid-run, batches UI updates (40 ms), approvals, usage, per-turn changed-file summary, model listing. |
 | `src/session/store.ts` | Chat history in `workspaceState` (nothing is written into the repository). |
 | `src/ui/chatViewProvider.ts` | Webview HTML with a strict CSP; `retainContextWhenHidden` keeps runs visible when the panel is hidden. |
@@ -111,6 +112,20 @@ Design rules that keep this from costing anything when unused:
 
 Trust: skills from the repository or its dependencies are instructions, so they are used only after a one-time per-workspace confirmation, are labelled as repository-provided when handed to the model, and `.gbs/` is in `SENSITIVE_WRITE` so the agent cannot quietly write its own.
 
+## MCP servers
+
+MCP tools are ordinary `Tool` objects, so the agent loop and the providers know nothing about MCP.
+
+- **Config** (`src/mcp/config.ts`): stdio entries from `.mcp.json`, then `.gbs/mcp.json`, then the `gbsAgent.mcpServers` user setting, later ones winning by name, so a repository cannot replace a server the user defined. HTTP/SSE entries are skipped with a log line. `${VAR}` and `${VAR:-default}` expand from the environment.
+- **Client** (`src/mcp/client.ts`): newline-delimited JSON-RPC over the child's stdio. It performs the `initialize` handshake, follows `tools/list` pages, makes `tools/call` requests with a timeout, and sends `notifications/cancelled` when the user stops the agent or a call times out. It answers the server's `ping` and declines other server requests. Lines on stdout that are not JSON are logged and ignored. On Windows, `.cmd`/`.bat` shims (`npx`, `pnpm`) are resolved on `PATH` and run through `cmd.exe /d /s /c` with quoted arguments; real executables are spawned directly.
+- **Manager** (`src/mcp/manager.ts`): one per window. It starts servers on the first request, keeps them across requests, restarts a server whose config changed or that exited, and stops removed ones. A failed server is reported once and not retried until its config changes or **Reload MCP Servers**.
+- **Adapter** (`src/mcp/tools.ts`): names are `mcp__<server>__<tool>`, cleaned to `[A-Za-z0-9_-]` and capped at 64 characters with a hash suffix. The input schema passes through, minus `$schema`. `readOnlyHint` only allows parallel execution and access from explore subagents; it never skips approval, because it is a claim made by the server.
+- **Per run** (`refreshMcp` in the controller): the tool list is fixed for the run, like skills. With no servers, prompts and tool schemas are unchanged. When there are tools, a short `# MCP tools` section (plus any server `instructions`) tells the model to treat results as data.
+
+Trust: servers from the repository start only after a modal that shows their exact command lines. Consent is stored per workspace with a SHA-256 fingerprint of the commands, arguments, environment and working folders, so any change asks again. `.mcp.json` and `.gbs/` are sensitive writes.
+
+Not covered yet: HTTP/SSE transports, resources and prompts, and tracking files that an MCP tool changes (those writes bypass snapshots, the turn summary and undo).
+
 ## Permissions
 
 `gbsAgent.permissionMode` (switchable from the composer):
@@ -123,6 +138,7 @@ Outside `auto`, these always need approval:
 - Edits to sensitive paths (`SENSITIVE_WRITE`): editor, git, and CI config; `package.json`; scripts; linter, test, and build configs that editor extensions execute automatically; dependency folders.
 - Reads of likely credential files (`SENSITIVE_READ`).
 - Commands containing shell operators or invisible characters.
+- MCP tool calls, unless that tool was "always allowed" this session.
 
 "Always allow" records a rule (`ruleFor`): a prefix such as `npm run build` or `git commit`, or only the exact command for interpreters, downloaders, and destructive tools. It is never offered for sensitive files or chained commands. Every edit records a snapshot, and the turn summary and tool rows have a diff button that opens VS Code's diff editor.
 

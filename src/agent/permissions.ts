@@ -45,6 +45,8 @@ const SENSITIVE_WRITE = [
   /(^|\/)\.devcontainer\//,
   /(^|\/)\.gbs\//,
   /(^|\/)(AGENTS|CLAUDE)\.md$/i,
+  // Defines MCP servers, i.e. commands the extension starts.
+  /(^|\/)\.mcp\.json$/,
   /(^|\/)package\.json$/,
   /(^|\/)\.npmrc$/,
   /(^|\/)\.yarnrc(\.yml)?$/,
@@ -141,6 +143,8 @@ function matchesRule(command: string, rule: CommandRule): boolean {
 export class PermissionPolicy {
   private readonly commandRules: CommandRule[] = [];
   private editsAllowedForSession = false;
+  /** MCP tools ("server · tool") the user allowed for the rest of the session. */
+  private readonly mcpAllowed = new Set<string>();
 
   needsApproval(request: PermissionRequest, mode: PermissionMode): boolean {
     if (mode === "auto") {
@@ -149,6 +153,8 @@ export class PermissionPolicy {
     switch (request.kind) {
       case "read":
         return true;
+      case "mcp":
+        return !this.mcpAllowed.has(request.detail);
       case "edit":
         if (request.path && isSensitiveWrite(request.path)) {
           return true;
@@ -175,6 +181,9 @@ export class PermissionPolicy {
     if (request.kind === "edit") {
       return !(request.path && isSensitiveWrite(request.path));
     }
+    if (request.kind === "mcp") {
+      return !DECEPTIVE_CHARS.test(request.detail);
+    }
     return !SHELL_META.test(request.detail) && !DECEPTIVE_CHARS.test(request.detail);
   }
 
@@ -184,6 +193,8 @@ export class PermissionPolicy {
     }
     if (request.kind === "edit") {
       this.editsAllowedForSession = true;
+    } else if (request.kind === "mcp") {
+      this.mcpAllowed.add(request.detail);
     } else if (request.kind === "command") {
       this.commandRules.push(ruleFor(request.detail));
     }
@@ -192,6 +203,7 @@ export class PermissionPolicy {
   reset(): void {
     this.commandRules.length = 0;
     this.editsAllowedForSession = false;
+    this.mcpAllowed.clear();
   }
 
   describeAlways(request: PermissionRequest): string | undefined {
@@ -200,6 +212,9 @@ export class PermissionPolicy {
     }
     if (request.kind === "edit") {
       return "Allow edits this session";
+    }
+    if (request.kind === "mcp") {
+      return `Always allow ${request.detail} this session`;
     }
     const rule = ruleFor(request.detail);
     return rule.type === "exact" ? "Always allow this exact command" : `Always allow \`${rule.value} …\``;

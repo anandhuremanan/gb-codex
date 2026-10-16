@@ -22,9 +22,11 @@ export type ToolSetName = keyof typeof toolSets;
 /**
  * Tools for an agent. The `skill` tool is added only when skills exist, so a workspace
  * without skills sends exactly the same tool schemas (and prompt) as before the feature.
+ * MCP tools are appended as given; the read-only explore agent gets only the ones the
+ * server marks read-only.
  */
-export function toolsFor(kind: ToolSetName, getSkills?: () => SkillMeta[]): Tool[] {
-  const base = toolSets[kind];
+export function toolsFor(kind: ToolSetName, getSkills?: () => SkillMeta[], mcpTools: Tool[] = []): Tool[] {
+  const base = [...toolSets[kind], ...(kind === "explore" ? mcpTools.filter((t) => t.readOnly) : mcpTools)];
   if (!getSkills || getSkills().every((s) => !s.valid)) {
     return base;
   }

@@ -46,7 +46,7 @@ export interface ToolContext {
   fileChanged(uri: vscode.Uri): void;
 }
 
-export type PermissionKind = "edit" | "command" | "read";
+export type PermissionKind = "edit" | "command" | "read" | "mcp";
 
 export interface PermissionRequest {
   kind: PermissionKind;

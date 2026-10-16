@@ -35,7 +35,7 @@ export interface ToolItem {
   line?: number;
   stats?: { added: number; removed: number };
   snapshotId?: string;
-  approval?: { kind: "edit" | "command" | "read"; detail: string; preview?: string; alwaysLabel?: string };
+  approval?: { kind: "edit" | "command" | "read" | "mcp"; detail: string; preview?: string; alwaysLabel?: string };
   subagent?: { type: string; toolUses: number; activity?: string };
 }
 

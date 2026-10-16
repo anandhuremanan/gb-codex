@@ -299,6 +299,38 @@ If the same name appears twice, the project wins over a package, and a package w
 - Skills from a repository or a dependency are instructions the agent will follow, so the first time a workspace offers them you're asked once. **GBS Agent: Reload Skills** asks again.
 - A skill missing its `name` or `description` is listed as invalid in the chip and never sent to the model.
 
+## MCP servers
+
+An MCP server is a program that gives the agent extra tools, such as a component library that answers questions about its own API. The agent starts the servers you configure, lists their tools, and calls them when they fit the task. Only stdio servers (a command the extension starts) are supported so far.
+
+### Adding one
+
+Put it under `mcpServers` in `.mcp.json` at the project root. This is the same file Claude Code reads, so a server set up for Claude Code (for example with `npx @grampro/kit mcp install`) works here with no extra step:
+
+```json
+{
+  "mcpServers": {
+    "grampro": { "command": "npx", "args": ["-y", "@grampro/kit", "mcp"] }
+  }
+}
+```
+
+| Location | Use for | Shared with |
+|---|---|---|
+| `.mcp.json` in the project | Servers the whole team should get | Everyone who clones the repo |
+| `.gbs/mcp.json` in the project | Servers only for this agent (overrides `.mcp.json` by name) | Everyone who clones the repo |
+| The `gbsAgent.mcpServers` user setting | Servers you want in every project | Just you |
+
+Each entry takes `command`, `args`, `env`, `cwd` (defaults to the workspace folder) and `disabled`. `${VAR}` and `${VAR:-default}` are read from the environment, which keeps tokens out of the file.
+
+### Using them
+
+- **`/mcp`** (or **GBS Agent: Show MCP Servers**) lists each server, whether it is running, and its tools. If one fails to start, the reason is shown once and the full error is in **GBS Agent: Show Logs**.
+- Tools appear to the model as `mcp__<server>__<tool>`. Every call shows an approval card with the arguments, unless the permission mode is **Full auto**. **Always allow** covers that one tool for the rest of the session.
+- Servers from a repository run commands that the repository chose, so they start only after you allow them once per workspace. You are asked again if any of those commands change. **GBS Agent: Reload MCP Servers** restarts everything and asks again.
+- Servers start on your first request and keep running until the window closes or the configuration changes. The first start of an `npx -y` server can take a while because it downloads the package.
+- An MCP tool can change files without going through the agent's edit review. Such changes are not part of the turn summary or **Undo**.
+
 ## Commands
 
 From the Command Palette (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd>):
@@ -313,8 +345,10 @@ From the Command Palette (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd>):
 | **GBS Agent: Open Skills Folder** | Opens your personal skills folder |
 | **GBS Agent: Reload Skills** | Re-reads skills and asks again about repository skills |
 | **GBS Agent: Show Logs** | Opens the log (requests, token usage, errors) |
+| **GBS Agent: Show MCP Servers** | Lists MCP servers, their state and their tools |
+| **GBS Agent: Reload MCP Servers** | Restarts MCP servers and asks again about repository servers |
 
-In the chat input: `/new`, `/compact`, `/skills`, `/help`.
+In the chat input: `/new`, `/compact`, `/skills`, `/mcp`, `/help`.
 
 ## Security
 
@@ -342,8 +376,10 @@ In the chat input: `/new`, `/compact`, `/skills`, `/help`.
 | `gbsAgent.shell` | *(empty)* | Shell for commands (default: cmd.exe on Windows, `$SHELL` elsewhere) |
 | `gbsAgent.skills.enabled` | `true` | Use skills at all |
 | `gbsAgent.skillsPath` | *(empty)* | Your personal skills folder (default: the extension's own folder) |
+| `gbsAgent.mcp.enabled` | `true` | Start MCP servers and give their tools to the agent |
+| `gbsAgent.mcpServers` | `{}` | MCP servers available in every project, in `.mcp.json` format |
 
-The provider, model, endpoints, permission mode, shell, and skills path must be set in **User** settings. Values in a project's `.vscode/settings.json` are ignored for those. API keys belong in secret storage via **GBS Agent: Set API Key**; the older `openai.apiKey` and `huggingfaceToken` settings still work but are deprecated, and `HF_TOKEN` or `OPENAI_API_KEY` in the environment is used when nothing is stored.
+The provider, model, endpoints, permission mode, shell, skills path and MCP servers must be set in **User** settings. Values in a project's `.vscode/settings.json` are ignored for those. API keys belong in secret storage via **GBS Agent: Set API Key**; the older `openai.apiKey` and `huggingfaceToken` settings still work but are deprecated, and `HF_TOKEN` or `OPENAI_API_KEY` in the environment is used when nothing is stored.
 
 ## Troubleshooting
 

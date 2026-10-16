@@ -35,6 +35,14 @@ export function activate(context: vscode.ExtensionContext) {
     }),
     vscode.commands.registerCommand("gbsAgent.showLogs", () => output.show()),
     vscode.commands.registerCommand("gbsAgent.reloadSkills", () => controller.reloadSkills()),
+    vscode.commands.registerCommand("gbsAgent.showMcpServers", async () => {
+      await vscode.commands.executeCommand(`${ChatViewProvider.viewId}.focus`);
+      await controller.showMcp();
+    }),
+    vscode.commands.registerCommand("gbsAgent.reloadMcpServers", async () => {
+      await vscode.commands.executeCommand(`${ChatViewProvider.viewId}.focus`);
+      await controller.reloadMcp();
+    }),
     vscode.commands.registerCommand("gbsAgent.openSkillsFolder", () => openSkillsFolder(controller.userSkillsDir())),
     vscode.commands.registerCommand("gbsAgent.newSkill", async () => {
       await createSkill(controller.userSkillsDir());

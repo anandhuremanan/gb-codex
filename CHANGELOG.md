@@ -4,6 +4,21 @@ All notable changes to the "gbs-local-dev" extension will be documented in this 
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [Unreleased]
+
+### Added
+- **MCP servers.** The agent can now use tools from stdio MCP servers. Servers come from `.mcp.json` (the file Claude
+  Code and installers such as `npx @grampro/kit mcp install` already write), `.gbs/mcp.json`, or the new
+  `gbsAgent.mcpServers` user setting. Their tools reach the model as `mcp__<server>__<tool>`. Every call shows an
+  approval card with its arguments unless the mode is Full auto, and "always allow" covers one tool for the session.
+  Servers defined by a repository start only after a one-time confirmation of the exact commands, which is asked again
+  whenever those commands change. `/mcp` and **GBS Agent: Show MCP Servers** list servers, their state and their tools;
+  **GBS Agent: Reload MCP Servers** restarts them. The client is built in, with no new dependency, and starts Windows
+  `.cmd` shims such as `npx` correctly.
+
+### Changed
+- Writing `.mcp.json` now needs approval, like other files that configure what runs.
+
 ## [0.0.13] - 2026-10-05
 
 ### Added
