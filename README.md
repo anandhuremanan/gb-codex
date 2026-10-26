@@ -1,3 +1,5 @@
+# The Repo For this Project is Moved to [GBS SE AGENT](https://github.com/gramproindia/GBS-SE-Agent), Further Development will be committed in the new repo.
+
 # GBS SE Agent
 
 An autonomous coding agent inside VS Code. Describe a task in the chat panel and the agent explores your codebase, edits files, runs commands, and shows every step as it works. It runs on **local models** (Ollama, LM Studio, llama.cpp, vLLM) or any **OpenAI-compatible** cloud endpoint (Hugging Face router, OpenRouter, …).
